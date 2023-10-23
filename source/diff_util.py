@@ -94,10 +94,10 @@ class DiffusionCollater:
             decoder_smiles = reacts_smiles
 
         # # add some number of length-padding tokens
-        # decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, 10) for smi in decoder_smiles)
+        decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, 10) for smi in decoder_smiles)
         
         encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=True)
-        decoder_input = self.tokeniser.tokenise(decoder_smiles, mask=False, pad=True)
+        decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)
         
         encoder_token_ids, encoder_pad_mask = self._partial_collate(encoder_input)
         m_encoder_token_ids, m_encoder_pad_mask = self._partial_collate(encoder_input, noised=True)

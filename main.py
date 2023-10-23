@@ -31,6 +31,8 @@ DEFAULT_CHEM_TOKEN_START = 272
 DEFAULT_GPUS = 1
 USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
+if use_gpu:
+    print("Using CUDA.")
 
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_LR = 0.001
@@ -85,7 +87,7 @@ def main():
 
     print("Reading datasets...")
     dataloaders = {}
-    num_available_cpus = 1#len(os.sched_getaffinity(0))
+    num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // args.gpus
     
     collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred)
@@ -97,16 +99,20 @@ def main():
     model = DiffusionModel(
         tokeniser=tokeniser,
         max_seq_len=DEFAULT_MAX_SEQ_LEN,
+        num_timesteps=args.num_timesteps,
         d_model=args.d_model,
         num_layers=args.num_layers,
         num_heads=args.num_heads,
         d_feedforward=args.d_feedforward,
         activation=DEFAULT_ACTIVATION,
-        dropout=DEFAULT_DROPOUT
+        dropout=DEFAULT_DROPOUT,
     )
-    
+   
+    if use_gpu:
+        model = model.cuda()
+ 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    trainer = DiffusionModelTrainer(model, optimizer, args.name)
+    trainer = DiffusionModelTrainer(model, optimizer, args.name, use_gpu=use_gpu)
 
     if os.path.exists(f'out/metrics/{args.name}_metrics_log.txt'):
         os.remove(f'out/metrics/{args.name}_metrics_log.txt')
@@ -115,7 +121,7 @@ def main():
         os.mkdir(f'out/samples/{args.name}/')
 
     print(f'Training {args.name} with heuristics...')
-    trainer.train(dataloaders, args.epochs, args.epochs, report_interval=1000, batch_limit=args.batch_limit, val_limit=10)
+    trainer.train(dataloaders, args.epochs, args.epochs, report_interval=None, batch_limit=args.batch_limit, val_limit=10)
 
 if __name__ == '__main__':
     main()

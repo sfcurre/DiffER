@@ -5,12 +5,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .diff_util import log_sample_categorical
+from .diff_util import log_sample_categorical, index_to_log_onehot
+from rdkit import Chem, RDLogger
 
 class DiffusionModel(nn.Module):
     def __init__(self,
         tokeniser,
         max_seq_len,
+        num_timesteps,
         d_model,
         num_layers, 
         num_heads,
@@ -21,7 +23,8 @@ class DiffusionModel(nn.Module):
         super(DiffusionModel, self).__init__()
 
         self.tokeniser = tokeniser
-        self.max_seq_len = max_seq_len 
+        self.max_seq_len = max_seq_len
+        self.num_timesteps = num_timesteps 
         self.d_model = d_model
         self.num_layers = num_layers
         self.num_heads = num_heads
@@ -34,7 +37,6 @@ class DiffusionModel(nn.Module):
 
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
         self.dropout = nn.Dropout(dropout)
-        self.pos_emb = self.positional_embs()
 
         enc_norm = nn.LayerNorm(d_model)
         enc_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True)
@@ -49,6 +51,9 @@ class DiffusionModel(nn.Module):
         self.log_softmax = nn.LogSoftmax(dim=2)
 
         self._init_params()
+        self.register_buffer("pos_emb", self.positional_embs())
+
+        RDLogger.DisableLog("rdApp.*")
 
     def _init_params(self):
         """
@@ -75,10 +80,12 @@ class DiffusionModel(nn.Module):
     def forward(self, batch):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
+        
         memory = self.encode(encoder_input, encoder_pad_mask)
         
         decoder_input = batch["decoder_input"]
         decoder_pad_mask = batch["decoder_pad_mask"].transpose(0, 1)
+        
         token_output = self.decode(decoder_input, decoder_pad_mask, memory, encoder_pad_mask)
         return token_output
 
@@ -100,63 +107,80 @@ class DiffusionModel(nn.Module):
 
     def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask):
         decoder_embs = self.embed_onehot(decoder_input)
+
+        seq_len, _, _ = tuple(decoder_embs.size())
+        tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool).cuda()
+
         model_output = self.decoder(decoder_embs, memory,
             tgt_key_padding_mask=decoder_pad_mask,
-            memory_key_padding_mask=memory_pad_mask
+            memory_key_padding_mask=memory_pad_mask,
+            tgt_mask=tgt_mask
         )
         token_output = self.token_fc(model_output)
         return token_output
 
-    def get_target_lengths(self, pad_mask):
+    def get_lengths_from_padding(self, pad_mask):
+        pad_mask = pad_mask.transpose(0, 1)
         lengths = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
-        return lengths
+        return lengths.squeeze()
 
     def get_length_mask(self, lengths):
         max_len = lengths.max().item()
         length_mask = torch.triu(torch.ones(max_len, max_len, dtype=torch.int32), 1)
-        length_mask = torch.stack([length_mask[lengths[batch] - 1] for batch in range(batch_size)], dim=0)
-        return length_mask
+        length_mask = torch.stack([length_mask[lengths[batch] - 1] for batch in range(len(lengths))], dim=0)
+        return length_mask.squeeze()
 
     def init_noise(self, target_lengths):
         length_mask = self.get_length_mask(target_lengths)
-        
         uniform_logits = torch.zeros((length_mask.shape[0], len(self.tokeniser), length_mask.shape[1]))
         tgt_tokens = torch.exp(log_sample_categorical(uniform_logits, len(self.tokeniser))).permute(2, 0, 1)
         
-        pad_token =  torch.exp(index_to_log_onehot(torch.tensor([[self.pad_token_id]]), len(self.tokeniser))).permute(2, 0, 1)
+        pad_token =  torch.exp(index_to_log_onehot(torch.tensor([[self.pad_token_idx]]), len(self.tokeniser))).permute(2, 0, 1)
         tgt_tokens = (1 - length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, verbose=True):
-        self.freeze()
-
+    def sample(self, batch, verbose=True, use_gpu=True):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
-        memory, memory_pad_mask = self.encode(encoder_input, encoder_pad_mask)
+        memory = self.encode(encoder_input, encoder_pad_mask)
 
-        lengths = self.get_lengths_from_padding(batch['target_pad'])
+        lengths = self.get_lengths_from_padding(batch['target_mask'].transpose(0, 1))
         tgt_tokens, length_mask = self.init_noise(lengths)
-        
+
+        if use_gpu:
+            tgt_tokens = tgt_tokens.cuda()
+            length_mask = length_mask.cuda()
+    
+        if verbose:
+            print(f'target: {batch["target_smiles"][0]}')
+
         for t in range(self.num_timesteps):
-            token_output = self.decode(tgt_tokens, length_mask, memory, memory_pad_mask)
+            token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask)
             tgt_tokens = torch.softmax(token_output, dim=-1)
 
-            if self.verbose:
-                ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).detach().numpy()
+            if verbose and (t < 10 or t == 49 or (t + 1) % 100 == 0):
+                ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
                 tokens = self.tokeniser.convert_ids_to_tokens(ids)
                 sampled_mols = self.tokeniser.detokenise(tokens)
 
-                print(f'{t + 1}: {sampled_mols[0]}')
+                m = sampled_mols[0]
+                sampled_mol = m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m
+                sampled_mol = sampled_mol.replace('?', '')
+                sampled_mol = Chem.MolFromSmiles(sampled_mol)
 
-        if self.verbose:
+                if sampled_mol is not None:
+                    m = sampled_mol
+
+                print(f'{t + 1}: {m}')
+
+        if verbose:
             print('-' * 20)
 
-        ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).detach().numpy()
+        ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
         tokens = self.tokeniser.convert_ids_to_tokens(ids)
         sampled_mols = self.tokeniser.detokenise(tokens)
 
         sampled_mols = [m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols]
         sampled_mols = [m.replace('?', '') for m in sampled_mols]
 
-        self.unfreeze()
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])

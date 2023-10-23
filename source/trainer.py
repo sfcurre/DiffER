@@ -7,11 +7,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from rdkit import Chem, RDLogger
+
 class DiffusionModelTrainer:
-    def __init__(self, model, optimizer, name='Default'):
+    def __init__(self, model, optimizer, name='Default', use_gpu=True):
         self.model = model
         self.optimizer = optimizer
         self.name = name
+        self.use_gpu = use_gpu
+        
+        RDLogger.DisableLog("rdApp.*")
 
     def train(self, dataloaders, epochs, patience, report_interval=None, batch_limit=None, val_limit=100):
         # Train model
@@ -41,8 +46,8 @@ class DiffusionModelTrainer:
             torch.save(self.model.state_dict(), 'out/models/{}_{}.pkl'.format(self.name, epoch))
             np.save(f'out/losses/{self.name}_losses.npy', np.array(loss_values))
 
-            if loss_values[-1][0] < best:
-                best = loss_values[-1][0]
+            if loss_values[-1] < best:
+                best = loss_values[-1]
                 best_epoch = epoch
                 bad_counter = 0
             else:
@@ -101,8 +106,15 @@ class DiffusionModelTrainer:
         with open(f'out/samples/{self.name}/sampled_mols_e{epoch.split()[0]}.json', 'w') as fp:
             json.dump(mols, fp)
 
+    def move_batch_to_gpu(self, batch):
+        for key, value in batch.items():
+            if hasattr(value, 'cuda'):
+                batch[key] = value.cuda()
         
     def train_step(self, batch):
+        if self.use_gpu:
+            self.move_batch_to_gpu(batch)
+
         self.model.train()
         self.optimizer.zero_grad()
         
@@ -111,19 +123,22 @@ class DiffusionModelTrainer:
         loss.backward()
 
         self.optimizer.step()
-        return loss.item()
+        return loss.cpu().item()
 
     def val_step(self, batch):
-        self.eval()
+        if self.use_gpu:
+            self.move_batch_to_gpu(batch)
+
+        self.model.eval()
         output = self.model.forward(batch)
         loss = self._calc_loss(batch, output)
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
-        sampled_smiles = self.model.sample(batch)
+        sampled_smiles, lprobs = self.model.sample(batch, verbose=True, use_gpu=self.use_gpu)
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
-        metrics = dict(val_loss=loss,
+        metrics = dict(val_loss=loss.cpu(),
                        token_accuracy=token_acc,
                        perplexity=perplexity,
                        mol_accuracy=sampling_metrics['accuracy'],
@@ -175,10 +190,9 @@ class DiffusionModelTrainer:
         return perp.mean()
 
     def _calc_sampling_metrics(self, batch_input, sampled_smiles):
-        target_smiles = batch['target_smiles']
+        target_smiles = batch_input['target_smiles']
         mol_targets = [Chem.MolFromSmiles(smi) for smi in target_smiles]
         canon_targets = [Chem.MolToSmiles(mol) for mol in mol_targets]
-        
         sampled_mols = [Chem.MolFromSmiles(smi) for smi in sampled_smiles]
         invalid = [mol is None for mol in sampled_mols]
 
