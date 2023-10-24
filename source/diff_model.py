@@ -169,7 +169,7 @@ class DiffusionModel(nn.Module):
                 sampled_mol = Chem.MolFromSmiles(sampled_mol)
 
                 if sampled_mol is not None:
-                    m = sampled_mol
+                    m = Chem.MolToSmiles(sampled_mol)
 
                 print(f'{t + 1}: {m}')
 
