@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .diff_util import log_sample_categorical, index_to_log_onehot
+from .diff_util import extract, log_sample_categorical, index_to_log_onehot, log_add_exp
 from rdkit import Chem, RDLogger
 
 class DiffusionModel(nn.Module):
@@ -89,9 +89,10 @@ class DiffusionModel(nn.Module):
         token_output = self.decode(decoder_input, decoder_pad_mask, memory, encoder_pad_mask)
         return token_output
 
-    def embed_onehot(self, onehot_input):
+    def embed_log_onehot(self, log_onehot_input):
         seq_len, _, _ = tuple(onehot_input.size())
 
+        onhot_input = torch.exp(log_onehot_input)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
@@ -101,12 +102,12 @@ class DiffusionModel(nn.Module):
         return onehot_embs
 
     def encode(self, encoder_input, encoder_pad_mask):
-        encoder_embs = self.embed_onehot(encoder_input)
+        encoder_embs = self.embed_log_onehot(encoder_input)
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
         return model_output
 
     def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask):
-        decoder_embs = self.embed_onehot(decoder_input)
+        decoder_embs = self.embed_log_onehot(decoder_input)
 
         seq_len, _, _ = tuple(decoder_embs.size())
         tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool).cuda()
@@ -133,9 +134,9 @@ class DiffusionModel(nn.Module):
     def init_noise(self, target_lengths):
         length_mask = self.get_length_mask(target_lengths)
         uniform_logits = torch.zeros((length_mask.shape[0], len(self.tokeniser), length_mask.shape[1]))
-        tgt_tokens = torch.exp(log_sample_categorical(uniform_logits, len(self.tokeniser))).permute(2, 0, 1)
+        tgt_tokens = log_sample_categorical(uniform_logits, len(self.tokeniser)).permute(2, 0, 1)
         
-        pad_token =  torch.exp(index_to_log_onehot(torch.tensor([[self.pad_token_idx]]), len(self.tokeniser))).permute(2, 0, 1)
+        pad_token =  index_to_log_onehot(torch.tensor([[self.pad_token_idx]]), len(self.tokeniser)).permute(2, 0, 1)
         tgt_tokens = (1 - length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
@@ -155,8 +156,12 @@ class DiffusionModel(nn.Module):
             print(f'target: {batch["target_smiles"][0]}')
 
         for t in range(self.num_timesteps):
+            # My code likes (time, batch, tokens)
+            # MultiDiffusion code likes (batch, tokens, time)
             token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask)
-            tgt_tokens = torch.softmax(token_output, dim=-1)
+            log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
+            log_model_pred = self.q_posterior(log_x_start=log_token_output, log_x_t=tgt_tokens.permute((1, 2, 0)), t=t)
+            tgt_tokens = log_sample_categorical(log_model_pred, len(self.tokeniser)).permute((2, 0, 1))
 
             if verbose and (t < 10 or t == 49 or (t + 1) % 100 == 0):
                 ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
@@ -184,3 +189,50 @@ class DiffusionModel(nn.Module):
         sampled_mols = [m.replace('?', '') for m in sampled_mols]
 
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])
+
+    def q_pred_one_timestep(self, log_x_t, t):
+        log_alpha_t = extract(self.log_alpha, t, log_x_t.shape)
+        log_1_min_alpha_t = extract(self.log_1_min_alpha, t, log_x_t.shape)
+
+        # alpha_t * E[xt] + (1 - alpha_t) 1 / K
+        log_probs = log_add_exp(
+            log_x_t + log_alpha_t,
+            log_1_min_alpha_t - np.log(self.num_classes)
+        )
+
+        return log_probs
+
+    def q_pred(self, log_x_start, t):
+        log_cumprod_alpha_t = extract(self.log_cumprod_alpha, t, log_x_start.shape)
+        log_1_min_cumprod_alpha = extract(self.log_1_min_cumprod_alpha, t, log_x_start.shape)
+
+        log_probs = log_add_exp(
+            log_x_start + log_cumprod_alpha_t,
+            log_1_min_cumprod_alpha - np.log(self.num_classes)
+        )
+
+        return log_probs
+
+    def q_posterior(self, log_x_start, log_x_t, t):
+        # q(xt-1 | xt, x0) = q(xt | xt-1, x0) * q(xt-1 | x0) / q(xt | x0)
+        # where q(xt | xt-1, x0) = q(xt | xt-1).
+
+        t_minus_1 = t - 1
+        # Remove negative values, will not be used anyway for final decoder
+        t_minus_1 = torch.where(t_minus_1 < 0, torch.zeros_like(t_minus_1), t_minus_1)
+        log_EV_qxtmin_x0 = self.q_pred(log_x_start, t_minus_1)
+
+        num_axes = (1,) * (len(log_x_start.size()) - 1)
+        t_broadcast = t.view(-1, *num_axes) * torch.ones_like(log_x_start)
+        log_EV_qxtmin_x0 = torch.where(t_broadcast == 0, log_x_start, log_EV_qxtmin_x0)
+
+
+        # Note: _NOT_ x_tmin1, which is how the formula is typically used!!!
+        # Not very easy to see why this is true. But it is :)
+        unnormed_logprobs = log_EV_qxtmin_x0 + self.q_pred_one_timestep(log_x_t, t)
+
+        log_EV_xtmin_given_xt_given_xstart = \
+            unnormed_logprobs \
+            - torch.logsumexp(unnormed_logprobs, dim=1, keepdim=True)
+
+        return log_EV_xtmin_given_xt_given_xstart
