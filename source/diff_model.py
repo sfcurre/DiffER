@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .diff_util import extract, log_sample_categorical, index_to_log_onehot, log_add_exp
+from .diff_util import extract, log_sample_categorical, index_to_log_onehot, log_add_exp, SinusoidalPosEmb
 from rdkit import Chem, RDLogger
 
 class DiffusionModel(nn.Module):
@@ -43,6 +43,7 @@ class DiffusionModel(nn.Module):
         self.pad_token_idx = pad_token_idx = self.tokeniser.vocab[self.tokeniser.pad_token]
 
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
+        self.time_emb = SinusoidalPosEmb(d_model, num_timesteps)
         self.dropout = nn.Dropout(dropout)
 
         enc_norm = nn.LayerNorm(d_model)
@@ -92,11 +93,12 @@ class DiffusionModel(nn.Module):
         
         decoder_input = batch["decoder_input"]
         decoder_pad_mask = batch["decoder_pad_mask"].transpose(0, 1)
+        t = batch["decoder_t"]
         
-        token_output = self.decode(decoder_input, decoder_pad_mask, memory, encoder_pad_mask)
+        token_output = self.decode(decoder_input, decoder_pad_mask, memory, encoder_pad_mask, t)
         return token_output
 
-    def embed_log_onehot(self, log_onehot_input):
+    def embed_log_onehot(self, log_onehot_input, t=None):
         seq_len, _, _ = tuple(log_onehot_input.size())
 
         onehot_input = torch.exp(log_onehot_input)
@@ -105,6 +107,9 @@ class DiffusionModel(nn.Module):
 
         positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
         onehot_embs = onehot_embs + positional_embs
+        if t is not None:
+            time_embs = self.time_emb(t)
+            onehot_embs += time_embs
         onehot_embs = self.dropout(onehot_embs)
         return onehot_embs
 
@@ -113,8 +118,8 @@ class DiffusionModel(nn.Module):
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
         return model_output
 
-    def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask):
-        decoder_embs = self.embed_log_onehot(decoder_input)
+    def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask, t):
+        decoder_embs = self.embed_log_onehot(decoder_input, t)
 
         seq_len, _, _ = tuple(decoder_embs.size())
         tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool).cuda()
@@ -169,7 +174,7 @@ class DiffusionModel(nn.Module):
         for t in reversed(range(1, self.num_timesteps)):
             # My code likes (time, batch, tokens)
             # MultiDiffusion code likes (batch, tokens, time)
-            token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask)
+            token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask, t)
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
             t_tensor = torch.full((log_token_output.shape[0],), t)
             if use_gpu:

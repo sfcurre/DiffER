@@ -55,6 +55,23 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     alphas = np.sqrt(alphas)
     return alphas
 
+class SinusoidalPosEmb(nn.Module):
+    def __init__(self, dim, num_steps, rescale_steps=4000):
+        super().__init__()
+        self.dim = dim
+        self.num_steps = float(num_steps)
+        self.rescale_steps = float(rescale_steps)
+
+    def forward(self, x):
+        x = x / self.num_steps * self.rescale_steps
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x[:, None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
+
 class DiffusionCollater:
     def __init__(self, tokeniser, num_timesteps, forward_pred):
         self.tokeniser = tokeniser
@@ -100,9 +117,9 @@ class DiffusionCollater:
         decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)
         
         encoder_token_ids, encoder_pad_mask = self._partial_collate(encoder_input)
-        m_encoder_token_ids, m_encoder_pad_mask = self._partial_collate(encoder_input, noised=True)
+        m_encoder_token_ids, m_encoder_pad_mask, m_encoder_t = self._partial_collate(encoder_input, noised=True)
         decoder_token_ids, decoder_pad_mask = self._partial_collate(decoder_input)
-        m_decoder_token_ids, m_decoder_pad_mask = self._partial_collate(decoder_input, noised=True)
+        m_decoder_token_ids, m_decoder_pad_mask, m_decoder_t = self._partial_collate(decoder_input, noised=True)
 
         collate_output = {
             "encoder_input": encoder_token_ids,
@@ -114,7 +131,8 @@ class DiffusionCollater:
             "target_smiles": decoder_smiles,
             "masked_encoder_input": m_encoder_token_ids,
             "masked_encoder_pad_mask": m_encoder_pad_mask,
-            "encoder_smiles": encoder_smiles
+            "encoder_smiles": encoder_smiles,
+            "decoder_t": m_decoder_t,
         }
         
         return collate_output
@@ -133,6 +151,7 @@ class DiffusionCollater:
             t = np.random.randint(0, self.num_timesteps - 1, size=len(input_tokens), dtype=np.int64)
             t = torch.tensor(t)
             input_token_ids = self.q_sample(input_token_ids, t)
+            return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
         
         return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask
 
