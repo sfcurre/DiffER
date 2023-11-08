@@ -134,7 +134,7 @@ class DiffusionCollater:
             t = torch.tensor(t)
             input_token_ids = self.q_sample(input_token_ids, t)
         
-        return torch.permute((2, 0, 1)), input_pad_mask
+        return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask
 
     def q_sample(self, log_x_start, t):
         log_EV_qxt_x0 = self.q_pred(log_x_start, t)

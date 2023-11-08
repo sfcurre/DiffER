@@ -49,6 +49,8 @@ def parse_args():
     parser.add_argument("--task", type=str)
     parser.add_argument("--name", type=str)
 
+    parser.add_argument("--load", type=str, default='')
+
     # Model and training args
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--lr", type=float, default=DEFAULT_LR)
@@ -98,6 +100,7 @@ def main():
 
     model = DiffusionModel(
         tokeniser=tokeniser,
+        collate_fn=collate_fn,    
         max_seq_len=DEFAULT_MAX_SEQ_LEN,
         num_timesteps=args.num_timesteps,
         d_model=args.d_model,
@@ -108,6 +111,9 @@ def main():
         dropout=DEFAULT_DROPOUT,
     )
    
+    if args.load:
+        model.load_state_dict(torch.load(args.load))
+
     if use_gpu:
         model = model.cuda()
  

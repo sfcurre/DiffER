@@ -11,6 +11,7 @@ from rdkit import Chem, RDLogger
 class DiffusionModel(nn.Module):
     def __init__(self,
         tokeniser,
+        collate_fn,
         max_seq_len,
         num_timesteps,
         d_model,
@@ -23,6 +24,7 @@ class DiffusionModel(nn.Module):
         super(DiffusionModel, self).__init__()
 
         self.tokeniser = tokeniser
+        self.collate_fn = collate_fn
         self.max_seq_len = max_seq_len
         self.num_timesteps = num_timesteps 
         self.d_model = d_model
@@ -31,6 +33,11 @@ class DiffusionModel(nn.Module):
         self.d_feedforward = d_feedforward
         self.activation = activation
         self.dropout = dropout
+
+        self.log_alpha = self.collate_fn.log_alpha
+        self.log_1_min_alpha = self.collate_fn.log_1_min_alpha
+        self.log_cumprod_alpha = self.collate_fn.log_cumprod_alpha
+        self.log_1_min_cumprod_alpha = self.collate_fn.log_1_min_cumprod_alpha
 
         self.vocab_size = vocab_size = len(tokeniser)
         self.pad_token_idx = pad_token_idx = self.tokeniser.vocab[self.tokeniser.pad_token]
@@ -90,9 +97,9 @@ class DiffusionModel(nn.Module):
         return token_output
 
     def embed_log_onehot(self, log_onehot_input):
-        seq_len, _, _ = tuple(onehot_input.size())
+        seq_len, _, _ = tuple(log_onehot_input.size())
 
-        onhot_input = torch.exp(log_onehot_input)
+        onehot_input = torch.exp(log_onehot_input)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
@@ -151,19 +158,26 @@ class DiffusionModel(nn.Module):
         if use_gpu:
             tgt_tokens = tgt_tokens.cuda()
             length_mask = length_mask.cuda()
+            self.log_alpha = self.log_alpha.cuda()
+            self.log_1_min_alpha = self.log_1_min_alpha.cuda()
+            self.log_cumprod_alpha = self.log_cumprod_alpha.cuda()
+            self.log_1_min_cumprod_alpha = self.log_1_min_cumprod_alpha.cuda()
     
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')
 
-        for t in range(self.num_timesteps):
+        for t in reversed(range(1, self.num_timesteps)):
             # My code likes (time, batch, tokens)
             # MultiDiffusion code likes (batch, tokens, time)
             token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask)
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
-            log_model_pred = self.q_posterior(log_x_start=log_token_output, log_x_t=tgt_tokens.permute((1, 2, 0)), t=t)
+            t_tensor = torch.full((log_token_output.shape[0],), t)
+            if use_gpu:
+                t_tensor = t_tensor.cuda()
+            log_model_pred = self.q_posterior(log_x_start=log_token_output, log_x_t=tgt_tokens.permute((1, 2, 0)), t=t_tensor)
             tgt_tokens = log_sample_categorical(log_model_pred, len(self.tokeniser)).permute((2, 0, 1))
 
-            if verbose and (t < 10 or t == 49 or (t + 1) % 100 == 0):
+            if verbose and (t <= 10 or t == 50 or (t) % 100 == 0):
                 ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
                 tokens = self.tokeniser.convert_ids_to_tokens(ids)
                 sampled_mols = self.tokeniser.detokenise(tokens)
@@ -176,7 +190,7 @@ class DiffusionModel(nn.Module):
                 if sampled_mol is not None:
                     m = Chem.MolToSmiles(sampled_mol)
 
-                print(f'{t + 1}: {m}')
+                print(f'{t}: {m}')
 
         if verbose:
             print('-' * 20)
@@ -197,7 +211,7 @@ class DiffusionModel(nn.Module):
         # alpha_t * E[xt] + (1 - alpha_t) 1 / K
         log_probs = log_add_exp(
             log_x_t + log_alpha_t,
-            log_1_min_alpha_t - np.log(self.num_classes)
+            log_1_min_alpha_t - np.log(len(self.tokeniser))
         )
 
         return log_probs
@@ -208,7 +222,7 @@ class DiffusionModel(nn.Module):
 
         log_probs = log_add_exp(
             log_x_start + log_cumprod_alpha_t,
-            log_1_min_cumprod_alpha - np.log(self.num_classes)
+            log_1_min_cumprod_alpha - np.log(len(self.tokeniser))
         )
 
         return log_probs
