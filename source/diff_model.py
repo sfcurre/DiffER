@@ -152,7 +152,7 @@ class DiffusionModel(nn.Module):
         tgt_tokens = (1 - length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, verbose=True, use_gpu=True):
+    def sample(self, batch, verbose=True, use_gpu=True, return_chain=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory = self.encode(encoder_input, encoder_pad_mask)
@@ -171,14 +171,19 @@ class DiffusionModel(nn.Module):
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')
 
+        if return_chain:
+            chain = [batch["target_smiles"]]
+
         for t in reversed(range(1, self.num_timesteps)):
             # My code likes (time, batch, tokens)
             # MultiDiffusion code likes (batch, tokens, time)
-            token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask, t)
-            log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
-            t_tensor = torch.full((log_token_output.shape[0],), t)
+            t_tensor = torch.full((length_mask.shape[0],), t)
             if use_gpu:
-                t_tensor = t_tensor.cuda()
+                t_tensor = t_tensor.cuda() 
+            
+            token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask, t_tensor)
+            log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
+            
             log_model_pred = self.q_posterior(log_x_start=log_token_output, log_x_t=tgt_tokens.permute((1, 2, 0)), t=t_tensor)
             tgt_tokens = log_sample_categorical(log_model_pred, len(self.tokeniser)).permute((2, 0, 1))
 
@@ -197,6 +202,12 @@ class DiffusionModel(nn.Module):
 
                 print(f'{t}: {m}')
 
+            if return_chain:
+                ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
+                tokens = self.tokeniser.convert_ids_to_tokens(ids)
+                sampled_mols = self.tokeniser.detokenise(tokens)
+                chain.append(sampled_mols)
+
         if verbose:
             print('-' * 20)
 
@@ -206,6 +217,9 @@ class DiffusionModel(nn.Module):
 
         sampled_mols = [m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols]
         sampled_mols = [m.replace('?', '') for m in sampled_mols]
+
+        if return_chain:
+            return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), chain
 
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])
 

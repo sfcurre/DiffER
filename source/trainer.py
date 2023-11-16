@@ -197,7 +197,7 @@ class DiffusionModelTrainer:
         invalid = [mol is None for mol in sampled_mols]
 
         canon_smiles = ["Unknown" if mol is None else Chem.MolToSmiles(mol) for mol in sampled_mols]
-        correct_smiles = [target_smiles[idx] == smi for idx, smi in enumerate(canon_smiles)]
+        correct_smiles = [canon_targets[idx] == smi for idx, smi in enumerate(canon_smiles)]
 
         num_correct = sum(correct_smiles)
         total = len(correct_smiles)

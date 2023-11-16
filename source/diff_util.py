@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+import math
 
 def extract(a, t, x_shape):
     b, *_ = t.shape
@@ -55,7 +56,7 @@ def cosine_beta_schedule(timesteps, s = 0.008):
     alphas = np.sqrt(alphas)
     return alphas
 
-class SinusoidalPosEmb(nn.Module):
+class SinusoidalPosEmb(torch.nn.Module):
     def __init__(self, dim, num_steps, rescale_steps=4000):
         super().__init__()
         self.dim = dim
@@ -111,8 +112,9 @@ class DiffusionCollater:
             decoder_smiles = reacts_smiles
 
         # # add some number of length-padding tokens
-        decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, 10) for smi in decoder_smiles)
-        
+        #decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, 10) for smi in decoder_smiles)
+        decoder_smiles_padded = decoder_smiles        
+
         encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=True)
         decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)
         
