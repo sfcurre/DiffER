@@ -107,7 +107,7 @@ class DiffuseqModel(nn.Module):
         token_output = self.token_fc(model_output)
 
         output_mask = torch.ones(combined_input.size()[0], device=batch['device'], dtype=bool)
-        output_mask[:in_seq_len + 2] = 0
+        output_mask[:in_seq_len + 1] = 0
         # print(output_mask.shape, combined_input.shape, token_output.shape)
         # token_output = torch.where(output_mask==0, combined_input, token_output)
         return token_output[output_mask]
@@ -193,7 +193,7 @@ class DiffuseqModel(nn.Module):
             token_output = log_sample_categorical(log_model_pred, len(self.tokeniser)).permute((2, 0, 1))
 
             output_mask = torch.ones(token_output.size()[0], device=batch['device'], dtype=bool)
-            output_mask[:in_seq_len + 2] = 0
+            output_mask[:in_seq_len + 1] = 0
             #tgt_tokens = torch.where(output_mask==0, tgt_tokens, token_output)
             tgt_tokens = token_output[output_mask]
             
