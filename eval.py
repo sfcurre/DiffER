@@ -128,19 +128,26 @@ def main():
         os.mkdir(f'out/samples/{args.name}/')
 
     print(f'Evaluating {args.name}...')
+  
+   
+    torch.manual_seed(1998) 
+    with torch.no_grad():
+        trainer.print_metrics(dataloaders['val'], 'Eval', 10)
+   
+ 
+    torch.manual_seed(1998) 
     chains = []
     for i, batch in enumerate(dataloaders['val']):
         if i >= 10:
             break
     
         trainer.move_batch_to_gpu(batch)
-        _, _, sample_chain = model.sample(batch, verbose=True, use_gpu=True, return_chain=True) 
+        _, _, sample_chain = model.sample(batch, verbose=False, use_gpu=True, return_chain=True) 
         chains.append(sample_chain)
     
     chains = np.array(chains)
     np.save(f"{args.name}_sample_chains.npy", chains)
-    
-
+   
 
 if __name__ == '__main__':
     main()
