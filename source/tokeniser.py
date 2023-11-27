@@ -1,5 +1,5 @@
 import re
-import torch
+# import torch
 import random
 from pathlib import Path
 
@@ -15,7 +15,7 @@ DEFAULT_SHOW_MASK_TOKEN_PROB = 1.0
 DEFAULT_MASK_SCHEME = "span"
 DEFAULT_SPAN_LAMBDA = 3.0
 
-REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9]"
+REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9]|<MASK>|<PAD>|<SEP>"
 
 class MolEncTokeniser:
     def __init__(
