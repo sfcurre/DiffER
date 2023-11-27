@@ -38,6 +38,102 @@ def index_to_log_onehot(x, num_classes):
 def log_onehot_to_index(log_x):
     return log_x.argmax(1)
 
+def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
+    """
+    Get a pre-defined beta schedule for the given name.
+
+    The beta schedule library consists of beta schedules which remain similar
+    in the limit of num_diffusion_timesteps.
+    Beta schedules may be added, but should not be removed or changed once
+    they are committed to maintain backwards compatibility.
+    """
+    if schedule_name == "linear":
+        # Linear schedule from Ho et al, extended to work for any number of
+        # diffusion steps.
+        scale = 1000 / num_diffusion_timesteps
+        beta_start = scale * 0.0001
+        beta_end = scale * 0.02
+        return np.linspace(
+            beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
+        )
+    elif schedule_name == "cosine":
+        return betas_for_alpha_bar(
+            num_diffusion_timesteps,
+            lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
+        )
+    elif schedule_name == 'sqrt':
+        return betas_for_alpha_bar(
+            num_diffusion_timesteps,
+            lambda t: 1-np.sqrt(t + 0.0001),
+        )
+    elif schedule_name == "trunc_cos":
+        return betas_for_alpha_bar_left(
+            num_diffusion_timesteps,
+            lambda t: np.cos((t + 0.1) / 1.1 * np.pi / 2) ** 2,
+        )
+    elif schedule_name == 'trunc_lin':
+        scale = 1000 / num_diffusion_timesteps
+        beta_start = scale * 0.0001 + 0.01
+        beta_end = scale * 0.02 + 0.01
+        return np.linspace(
+            beta_start, beta_end, num_diffusion_timesteps, dtype=np.float64
+        )
+    elif schedule_name == 'pw_lin':
+        scale = 1000 / num_diffusion_timesteps
+        beta_start = scale * 0.0001 + 0.01
+        beta_mid = scale * 0.0001  #scale * 0.02
+        beta_end = scale * 0.02
+        first_part = np.linspace(
+            beta_start, beta_mid, 10, dtype=np.float64
+        )
+        second_part = np.linspace(
+            beta_mid, beta_end, num_diffusion_timesteps - 10 , dtype=np.float64
+        )
+        return np.concatenate(
+            [first_part, second_part]
+        )
+    else:
+        raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
+
+def betas_for_alpha_bar_left(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
+    """
+    Create a beta schedule that discretizes the given alpha_t_bar function, but shifts towards left interval starting from 0
+    which defines the cumulative product of (1-beta) over time from t = [0,1].
+
+    :param num_diffusion_timesteps: the number of betas to produce.
+    :param alpha_bar: a lambda that takes an argument t from 0 to 1 and
+                      produces the cumulative product of (1-beta) up to that
+                      part of the diffusion process.
+    :param max_beta: the maximum beta to use; use values lower than 1 to
+                     prevent singularities.
+    """
+    betas = []
+    betas.append(min(1-alpha_bar(0), max_beta))
+    for i in range(num_diffusion_timesteps-1):
+        t1 = i / num_diffusion_timesteps
+        t2 = (i + 1) / num_diffusion_timesteps
+        betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
+    return np.array(betas)
+
+def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
+    """
+    Create a beta schedule that discretizes the given alpha_t_bar function,
+    which defines the cumulative product of (1-beta) over time from t = [0,1].
+
+    :param num_diffusion_timesteps: the number of betas to produce.
+    :param alpha_bar: a lambda that takes an argument t from 0 to 1 and
+                      produces the cumulative product of (1-beta) up to that
+                      part of the diffusion process.
+    :param max_beta: the maximum beta to use; use values lower than 1 to
+                     prevent singularities.
+    """
+    betas = []
+    for i in range(num_diffusion_timesteps):
+        t1 = i / num_diffusion_timesteps
+        t2 = (i + 1) / num_diffusion_timesteps
+        betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
+    return np.array(betas)
+
 def cosine_beta_schedule(timesteps, s = 0.008):
     """
     cosine schedule
@@ -74,12 +170,13 @@ class SinusoidalPosEmb(torch.nn.Module):
         return emb
 
 class DiffusionCollater:
-    def __init__(self, tokeniser, num_timesteps, forward_pred):
+    def __init__(self, tokeniser, num_timesteps, forward_pred, beta_schedule='cosine'):
         self.tokeniser = tokeniser
         self.num_timesteps = num_timesteps
         self.forward_pred = forward_pred
         
-        alphas = cosine_beta_schedule(num_timesteps)
+        # alphas = cosine_beta_schedule(num_timesteps)
+        alphas = get_named_beta_schedule(beta_schedule, num_diffusion_timesteps=num_timesteps)
 
         alphas = torch.tensor(alphas.astype('float64'))
         log_alpha = np.log(alphas)
@@ -135,6 +232,7 @@ class DiffusionCollater:
             "masked_encoder_pad_mask": m_encoder_pad_mask,
             "encoder_smiles": encoder_smiles,
             "decoder_t": m_decoder_t,
+            "device": "cpu"
         }
         
         return collate_output

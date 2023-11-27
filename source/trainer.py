@@ -110,6 +110,7 @@ class DiffusionModelTrainer:
         for key, value in batch.items():
             if hasattr(value, 'cuda'):
                 batch[key] = value.cuda()
+        batch['device'] = 'cuda'
         
     def train_step(self, batch):
         if self.use_gpu:

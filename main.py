@@ -9,6 +9,7 @@ from source.data import RSmilesUspto50
 from source.diff_util import DiffusionCollater
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.diff_model import DiffusionModel
+from source.diffuseq_model import DiffuseqModel
 from source.trainer import DiffusionModelTrainer
 
 
@@ -89,7 +90,7 @@ def main():
 
     print("Reading datasets...")
     dataloaders = {}
-    num_available_cpus = len(os.sched_getaffinity(0))
+    num_available_cpus = 1#len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // args.gpus
     
     collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred)
@@ -98,7 +99,20 @@ def main():
         dataloaders[split] = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     print("Finished datasets.")
 
-    model = DiffusionModel(
+    # model = DiffusionModel(
+    #     tokeniser=tokeniser,
+    #     collate_fn=collate_fn,    
+    #     max_seq_len=DEFAULT_MAX_SEQ_LEN,
+    #     num_timesteps=args.num_timesteps,
+    #     d_model=args.d_model,
+    #     num_layers=args.num_layers,
+    #     num_heads=args.num_heads,
+    #     d_feedforward=args.d_feedforward,
+    #     activation=DEFAULT_ACTIVATION,
+    #     dropout=DEFAULT_DROPOUT,
+    # )
+   
+    model = DiffuseqModel(
         tokeniser=tokeniser,
         collate_fn=collate_fn,    
         max_seq_len=DEFAULT_MAX_SEQ_LEN,
@@ -110,7 +124,7 @@ def main():
         activation=DEFAULT_ACTIVATION,
         dropout=DEFAULT_DROPOUT,
     )
-   
+
     if args.load:
         model.load_state_dict(torch.load(args.load))
 
