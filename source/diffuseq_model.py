@@ -108,10 +108,9 @@ class DiffuseqModel(nn.Module):
 
         output_mask = torch.ones_like(combined_input, device=batch['device'])
         output_mask[:in_seq_len + 2] = 0
-        print(output_mask.shape, combined_input.shape, token_output.shape)
-        token_output = torch.where(output_mask==0, combined_input, token_output)
-        
-        return token_output
+        # print(output_mask.shape, combined_input.shape, token_output.shape)
+        # token_output = torch.where(output_mask==0, combined_input, token_output)
+        return token_output[output_mask]
 
     def embed_log_onehot(self, log_onehot_input, t=None):
         seq_len, _, _ = tuple(log_onehot_input.size())
@@ -168,7 +167,6 @@ class DiffuseqModel(nn.Module):
         t = batch["decoder_t"]
 
         # padding is 1 where pad is, 0 else
-        tgt_tokens = torch.concat([in_input, self.sep_token.repeat(1, batch_size, 1), tgt_tokens])
         length_mask = torch.concat([in_pad_mask, torch.zeros((batch_size, 1), device=batch['device']), length_mask], axis=-1)
 
         if verbose:
@@ -184,6 +182,7 @@ class DiffuseqModel(nn.Module):
             if use_gpu:
                 t_tensor = t_tensor.cuda() 
             
+            tgt_tokens = torch.concat([in_input, self.sep_token.repeat(1, batch_size, 1), tgt_tokens])
             embs = self.embed_log_onehot(tgt_tokens, t)
             model_output = self.transformer(embs, length_mask)
             token_output = self.token_fc(model_output)
@@ -195,7 +194,8 @@ class DiffuseqModel(nn.Module):
 
             output_mask = torch.ones_like(token_output, device=batch['device'])
             output_mask[:in_seq_len + 2] = 0
-            tgt_tokens = torch.where(output_mask==0, tgt_tokens, token_output)
+            #tgt_tokens = torch.where(output_mask==0, tgt_tokens, token_output)
+            tgt_tokens = token_output[output_mask]
             
             if verbose and (t <= 10 or t == 50 or (t) % 100 == 0):
                 ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
