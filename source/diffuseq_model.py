@@ -144,7 +144,7 @@ class DiffuseqModel(nn.Module):
         tgt_tokens = log_sample_categorical(uniform_logits, len(self.tokeniser)).permute(2, 0, 1)
         
         tgt_tokens = (1 - length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + \
-                          length_mask.transpose(0, 1).unsqueeze(-1) * self.pad_token 
+                          length_mask.transpose(0, 1).unsqueeze(-1) * self.pad_token.cpu() 
         return tgt_tokens, length_mask
 
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False):
@@ -164,8 +164,6 @@ class DiffuseqModel(nn.Module):
     
         batch_size, in_seq_len = tuple(in_pad_mask.size())
 
-        t = batch["decoder_t"]
-
         # padding is 1 where pad is, 0 else
         length_mask = torch.concat([in_pad_mask, torch.zeros((batch_size, 1), device=batch['device']), length_mask], axis=-1)
 
@@ -183,8 +181,8 @@ class DiffuseqModel(nn.Module):
                 t_tensor = t_tensor.cuda() 
             
             tgt_tokens = torch.concat([in_input, self.sep_token.repeat(1, batch_size, 1), tgt_tokens])
-            embs = self.embed_log_onehot(tgt_tokens, t)
-            model_output = self.transformer(embs, length_mask)
+            embs = self.embed_log_onehot(tgt_tokens, t_tensor)
+            model_output = self.transformer(embs, src_key_padding_mask=length_mask)
             token_output = self.token_fc(model_output)
 
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
