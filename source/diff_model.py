@@ -34,10 +34,10 @@ class DiffusionModel(nn.Module):
         self.activation = activation
         self.dropout = dropout
 
-        self.log_alpha = self.collate_fn.log_alpha
-        self.log_1_min_alpha = self.collate_fn.log_1_min_alpha
-        self.log_cumprod_alpha = self.collate_fn.log_cumprod_alpha
-        self.log_1_min_cumprod_alpha = self.collate_fn.log_1_min_cumprod_alpha
+        self.register_buffer("log_alpha", self.collate_fn.log_alpha)
+        self.register_buffer("log_1_min_alpha", self.collate_fn.log_1_min_alpha)
+        self.register_buffer("log_cumprod_alpha", self.collate_fn.log_cumprod_alpha)
+        self.register_buffer("log_1_min_cumprod_alpha", self.collate_fn.log_1_min_cumprod_alpha)
 
         self.vocab_size = vocab_size = len(tokeniser)
         self.pad_token_idx = pad_token_idx = self.tokeniser.vocab[self.tokeniser.pad_token]
@@ -163,10 +163,6 @@ class DiffusionModel(nn.Module):
         if use_gpu:
             tgt_tokens = tgt_tokens.cuda()
             length_mask = length_mask.cuda()
-            self.log_alpha = self.log_alpha.cuda()
-            self.log_1_min_alpha = self.log_1_min_alpha.cuda()
-            self.log_cumprod_alpha = self.log_cumprod_alpha.cuda()
-            self.log_1_min_cumprod_alpha = self.log_1_min_cumprod_alpha.cuda()
     
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')

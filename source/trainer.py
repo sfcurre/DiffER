@@ -164,22 +164,26 @@ class DiffusionModelTrainer:
         
         if 'nll' in self.loss or 'vb' in self.loss:
             nll_loss = -lprobs.gather(dim=-1, index=target)[non_pad_mask]
+            nll_loss = nll_loss.reshape((token_output.size(0), token_output.size(1))).transpose(0, 1)
+            nll_loss = nll_loss.sum(dim=-1)
             loss_terms['nll'] = nll_loss.sum()
 
         if 'mse' in self.loss:
             probs = F.softmax(token_output, dim=-1)
             probs = probs.view(-1, probs.size(-1))
-            mse_loss = (x_start - probs) ** 2
+            mse_loss = (x_start.reshape(-1, probs.size(-1)) - probs) ** 2
             loss_terms['mse'] = mse_loss.sum()
 
         if 'kl' in self.loss or 'vb' in self.loss:
-            log_true_prob = self.model.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)))
-            log_model_prob = self.model.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)))
-            kl = (log_true_prob.exp() * (log_true_prob - log_model_prob)).sum(dim=1)
+            log_x_t = batch_input['decoder_input'].permute((1, 2, 0))
+            log_true_prob = self.model.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)), log_x_t, t)
+            log_model_prob = self.model.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)), log_x_t, t)
+            kl = (log_true_prob.exp() * (log_true_prob - log_model_prob)).sum(dim=(1, 2))
             loss_terms['kl'] = kl.sum()
 
         if 'vb' in self.loss:
             mask = (t == torch.zeros_like(t)).float()
+
             vb_loss = mask * nll_loss + (1. - mask) * kl
             loss_terms['vb'] = vb_loss.sum()
 
