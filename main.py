@@ -61,6 +61,10 @@ def parse_args():
     parser.add_argument("--gpus", type=int, default=DEFAULT_GPUS)
     
     parser.add_argument("--num_timesteps", type=int, default=1000)
+    parser.add_argument("--diffuseq", action='store_true')
+
+    parser.add_argument("--beta_schedule", type=str, default='cosine')
+    parser.add_argument("--loss_terms", type=str, default='nll')
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=None)
@@ -93,26 +97,17 @@ def main():
     num_available_cpus = 1#len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // args.gpus
     
-    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred)
+    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, beta_schedule=args.beta_schedule)
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(args.data_path, split, args.aug_prob, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     print("Finished datasets.")
 
-    # model = DiffusionModel(
-    #     tokeniser=tokeniser,
-    #     collate_fn=collate_fn,    
-    #     max_seq_len=DEFAULT_MAX_SEQ_LEN,
-    #     num_timesteps=args.num_timesteps,
-    #     d_model=args.d_model,
-    #     num_layers=args.num_layers,
-    #     num_heads=args.num_heads,
-    #     d_feedforward=args.d_feedforward,
-    #     activation=DEFAULT_ACTIVATION,
-    #     dropout=DEFAULT_DROPOUT,
-    # )
-   
-    model = DiffuseqModel(
+    model_class = DiffusionModel
+    if args.diffuseq:
+        model_class = DiffuseqModel
+    
+    model = model_class(
         tokeniser=tokeniser,
         collate_fn=collate_fn,    
         max_seq_len=DEFAULT_MAX_SEQ_LEN,
@@ -132,7 +127,7 @@ def main():
         model = model.cuda()
  
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    trainer = DiffusionModelTrainer(model, optimizer, args.name, use_gpu=use_gpu)
+    trainer = DiffusionModelTrainer(model, optimizer, args.name, loss_components=args.loss_terms.split(','), use_gpu=use_gpu)
 
     if os.path.exists(f'out/metrics/{args.name}_metrics_log.txt'):
         os.remove(f'out/metrics/{args.name}_metrics_log.txt')
