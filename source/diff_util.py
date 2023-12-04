@@ -176,7 +176,7 @@ class DiffusionCollater:
         self.forward_pred = forward_pred
         
         # alphas = cosine_beta_schedule(num_timesteps)
-        alphas = get_named_beta_schedule(beta_schedule, num_diffusion_timesteps=num_timesteps)
+        alphas = 1 - get_named_beta_schedule(beta_schedule, num_diffusion_timesteps=num_timesteps)
 
         alphas = torch.tensor(alphas.astype('float64'))
         log_alpha = np.log(alphas)
@@ -226,10 +226,11 @@ class DiffusionCollater:
             "decoder_input": m_decoder_token_ids,
             "decoder_pad_mask": m_decoder_pad_mask,
             "target": decoder_token_ids.max(dim=-1)[1],
+            "target_onehots": decoder_token_ids,
             "target_mask": decoder_pad_mask,
             "target_smiles": decoder_smiles,
-            "masked_encoder_input": m_encoder_token_ids,
-            "masked_encoder_pad_mask": m_encoder_pad_mask,
+            # "masked_encoder_input": m_encoder_token_ids,
+            # "masked_encoder_pad_mask": m_encoder_pad_mask,
             "encoder_smiles": encoder_smiles,
             "decoder_t": m_decoder_t,
             "device": "cpu"
@@ -248,7 +249,7 @@ class DiffusionCollater:
         input_pad_mask = torch.tensor(input_mask, dtype=torch.bool).transpose(0, 1)
 
         if noised:
-            t = np.random.randint(0, self.num_timesteps - 1, size=len(input_tokens), dtype=np.int64)
+            t = np.random.randint(0, self.num_timesteps, size=len(input_tokens), dtype=np.int64)
             t = torch.tensor(t)
             input_token_ids = self.q_sample(input_token_ids, t)
             return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t

@@ -10,10 +10,11 @@ import torch.nn.functional as F
 from rdkit import Chem, RDLogger
 
 class DiffusionModelTrainer:
-    def __init__(self, model, optimizer, name='Default', use_gpu=True):
+    def __init__(self, model, optimizer, name='Default', loss_components=['nll'], use_gpu=True):
         self.model = model
         self.optimizer = optimizer
         self.name = name
+        self.loss = loss
         self.use_gpu = use_gpu
         
         RDLogger.DisableLog("rdApp.*")
@@ -120,7 +121,7 @@ class DiffusionModelTrainer:
         self.optimizer.zero_grad()
         
         output = self.model.forward(batch)
-        loss = self._calc_loss(batch, output)
+        loss = self._calc_loss(batch, output)['loss']
         loss.backward()
 
         self.optimizer.step()
@@ -132,7 +133,7 @@ class DiffusionModelTrainer:
 
         self.model.eval()
         output = self.model.forward(batch)
-        loss = self._calc_loss(batch, output)
+        loss = self._calc_loss(batch, output)['loss']
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
@@ -150,16 +151,41 @@ class DiffusionModelTrainer:
     def _calc_loss(self, batch_input, token_output):
         tokens = batch_input["target"]
         pad_mask = batch_input["target_mask"]
-    
+        x_start = batch_input["target_onehots"]
+        t = batch_input['decoder_t']
+
         lprobs = F.log_softmax(token_output, dim=-1)
 
         lprobs = lprobs.view(-1, lprobs.size(-1))
         target = tokens.reshape(-1, 1)
         non_pad_mask = target.ne(pad_mask.reshape(-1, 1))
-            
-        nll_loss = -lprobs.gather(dim=-1, index=target)[non_pad_mask]
-        nll_loss = nll_loss.sum()
-        return nll_loss
+
+        loss_terms = {}    
+        
+        if 'nll' in self.loss or 'vb' in self.loss:
+            nll_loss = -lprobs.gather(dim=-1, index=target)[non_pad_mask]
+            loss_terms['nll'] = nll_loss.sum()
+
+        if 'mse' in self.loss:
+            probs = F.softmax(token_output, dim=-1)
+            probs = probs.view(-1, probs.size(-1))
+            mse_loss = (x_start - probs) ** 2
+            loss_terms['mse'] = mse_loss.sum()
+
+        if 'kl' in self.loss or 'vb' in self.loss:
+            log_true_prob = self.model.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)))
+            log_model_prob = self.model.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)))
+            kl = (log_true_prob.exp() * (log_true_prob - log_model_prob)).sum(dim=1)
+            loss_terms['kl'] = kl.sum()
+
+        if 'vb' in self.loss:
+            mask = (t == torch.zeros_like(t)).float()
+            vb_loss = mask * nll_loss + (1. - mask) * kl
+            loss_terms['vb'] = vb_loss.sum()
+
+        loss_terms['loss'] = sum(loss_terms[term] for term in loss_terms)
+
+        return loss_terms
 
     def _calc_token_acc(self, batch_input, token_output):
         token_ids = batch_input["target"]
