@@ -14,7 +14,7 @@ class DiffusionModelTrainer:
         self.model = model
         self.optimizer = optimizer
         self.name = name
-        self.loss = loss
+        self.loss = loss_components
         self.use_gpu = use_gpu
         
         RDLogger.DisableLog("rdApp.*")
