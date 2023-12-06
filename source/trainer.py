@@ -154,39 +154,43 @@ class DiffusionModelTrainer:
         x_start = batch_input["target_onehots"]
         t = batch_input['decoder_t']
 
-        lprobs = F.log_softmax(token_output, dim=-1)
-
-        lprobs = lprobs.view(-1, lprobs.size(-1))
-        target = tokens.reshape(-1, 1)
-        non_pad_mask = target.ne(pad_mask.reshape(-1, 1))
-
         loss_terms = {}    
         
         if 'nll' in self.loss or 'vb' in self.loss:
-            nll_loss = -lprobs.gather(dim=-1, index=target)[non_pad_mask]
-            nll_loss = nll_loss.reshape((token_output.size(0), token_output.size(1))).transpose(0, 1)
-            nll_loss = nll_loss.sum(dim=-1)
+            lprobs = F.log_softmax(token_output, dim=-1)
+            non_pad_mask = tokens.ne(self.model.pad_token_idx)
+            nll_loss = -lprobs.gather(dim=-1, index=tokens[..., None])
+            nll_loss = nll_loss.squeeze() * non_pad_mask
+            nll_loss = nll_loss.sum(dim=0)
             loss_terms['nll'] = nll_loss.mean()
 
         if 'mse' in self.loss:
             probs = F.softmax(token_output, dim=-1)
-            probs = probs.view(-1, probs.size(-1))
-            mse_loss = (x_start.reshape(-1, probs.size(-1)) - probs) ** 2
+            mse_loss = (x_start - probs) ** 2
+            mse_loss = mse_loss.sum(dim=(0, 2))
             loss_terms['mse'] = mse_loss.mean()
 
         if 'kl' in self.loss or 'vb' in self.loss:
             log_x_t = batch_input['decoder_input'].permute((1, 2, 0))
             log_true_prob = self.model.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)), log_x_t, t)
             log_model_prob = self.model.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)), log_x_t, t)
-            kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob)).sum(dim=(1, 2))
+            kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob))
+            kl = kl.sum(dim=(1, 2))
             loss_terms['kl'] = kl.mean()
 
         if 'vb' in self.loss:
             mask = (t == torch.zeros_like(t)).float()
-
             vb_loss = mask * nll_loss + (1. - mask) * kl
             loss_terms['vb'] = vb_loss.mean()
 
+        if 'parentheses' in self.loss:
+            open_idx = self.model.tokeniser.vocab['(']
+            close_idx = self.model.tokeniser.vocab[')']
+            probs = F.softmax(token_output, dim=-1)
+            err = (probs[..., open_idx] - probs[..., close_idx]) ** 2
+            parentheses_loss = err.sum(dim=0)
+            loss_terms['parentheses'] = parentheses_loss.mean()
+            
         loss_terms['loss'] = sum(loss_terms[term] for term in loss_terms)
 
         return loss_terms
