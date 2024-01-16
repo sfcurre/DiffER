@@ -253,7 +253,7 @@ class DiffusionCollater:
 
         if noised:
             #importance sample t
-            t, _ = self.sample_time(size=len(input_tokens)) 
+            t, _ = self.sample_time(size=len(input_tokens), method='importance')
             input_token_ids = self.q_sample(input_token_ids, t)
             return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
         
