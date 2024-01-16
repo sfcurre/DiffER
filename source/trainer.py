@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rdkit import Chem, RDLogger
+import selfies as sf
 
 class DiffusionModelTrainer:
     def __init__(self, model, optimizer, name='Default', loss_components=['nll'], use_gpu=True):
@@ -148,7 +149,7 @@ class DiffusionModelTrainer:
 
         return metrics, sampled_smiles
 
-    def _calc_loss(self, batch_input, token_output):
+    def _calc_loss(self, batch_input, token_output, update_Lt=True):
         tokens = batch_input["target"]
         pad_mask = batch_input["target_mask"]
         x_start = batch_input["target_onehots"]
@@ -170,12 +171,14 @@ class DiffusionModelTrainer:
             mse_loss = mse_loss.sum(dim=(0, 2))
             loss_terms['mse'] = mse_loss.mean()
 
-        if 'kl' in self.loss or 'vb' in self.loss:
+        if 'kl' in self.loss or 'vb' in self.loss or update_Lt:
             log_x_t = batch_input['decoder_input'].permute((1, 2, 0))
             log_true_prob = self.model.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)), log_x_t, t)
             log_model_prob = self.model.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)), log_x_t, t)
             kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob))
             kl = kl.sum(dim=(1, 2))
+            if update_Lt:
+                self.model.collate_fn.update_Lt(t, kl)
             loss_terms['kl'] = kl.mean()
 
         if 'vb' in self.loss:
@@ -226,9 +229,9 @@ class DiffusionModelTrainer:
 
     def _calc_sampling_metrics(self, batch_input, sampled_smiles):
         target_smiles = batch_input['target_smiles']
-        mol_targets = [Chem.MolFromSmiles(smi) for smi in target_smiles]
+        mol_targets = [Chem.MolFromSmiles(sf.decoder(smi)) for smi in target_smiles]
         canon_targets = [Chem.MolToSmiles(mol) for mol in mol_targets]
-        sampled_mols = [Chem.MolFromSmiles(smi) for smi in sampled_smiles]
+        sampled_mols = [Chem.MolFromSmiles(sf.decoder(smi)) for smi in sampled_smiles]
         invalid = [mol is None for mol in sampled_mols]
 
         canon_smiles = ["Unknown" if mol is None else Chem.MolToSmiles(mol) for mol in sampled_mols]

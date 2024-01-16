@@ -195,6 +195,9 @@ class DiffusionCollater:
         self.log_cumprod_alpha = log_cumprod_alpha.float()
         self.log_1_min_cumprod_alpha = log_1_min_cumprod_alpha.float()
 
+        self.Lt_history = torch.zeros(num_timesteps)
+        self.Lt_count = torch.zeros(num_timesteps)
+
     def __call__(self, batch):
         return self._collate(batch)
 
@@ -249,8 +252,8 @@ class DiffusionCollater:
         input_pad_mask = torch.tensor(input_mask, dtype=torch.bool).transpose(0, 1)
 
         if noised:
-            t = np.random.randint(0, self.num_timesteps, size=len(input_tokens), dtype=np.int64)
-            t = torch.tensor(t)
+            #importance sample t
+            t, _ = self.sample_time(size=len(input_tokens)) 
             input_token_ids = self.q_sample(input_token_ids, t)
             return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
         
@@ -271,3 +274,33 @@ class DiffusionCollater:
         )
 
         return log_probs
+
+    def sample_time(self, size, method='uniform'):
+        if method == 'importance':
+            if not (self.Lt_count > 10).all():
+                return self.sample_time(size, method='uniform')
+
+            Lt_sqrt = torch.sqrt(self.Lt_history + 1e-10) + 0.0001
+            Lt_sqrt[0] = Lt_sqrt[1]  # Overwrite decoder term with L1.
+            pt_all = Lt_sqrt / Lt_sqrt.sum()
+
+            t = torch.multinomial(pt_all, num_samples=size, replacement=True)
+
+            pt = pt_all.gather(dim=0, index=t)
+
+            return t, pt
+
+        elif method == 'uniform':
+            t = torch.randint(0, self.num_timesteps, (size,)).long()
+
+            pt = torch.ones_like(t).float() / self.num_timesteps
+            return t, pt
+        else:
+            raise ValueError
+        
+    def update_Lt(self, t, kl):
+        Lt2 = kl.pow(2)
+        Lt2_prev = self.Lt_history.gather(dim=0, index=t)
+        new_Lt_history = (0.1 * Lt2 + 0.9 * Lt2_prev).detach()
+        self.Lt_history.scatter_(dim=0, index=t, src=new_Lt_history)
+        self.Lt_count.scatter_add_(dim=0, index=t, src=torch.ones_like(Lt2))

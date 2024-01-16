@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from .diff_util import extract, log_sample_categorical, index_to_log_onehot, log_add_exp, SinusoidalPosEmb
 from rdkit import Chem, RDLogger
+import selfies as sf
 
 class DiffusionModel(nn.Module):
     def __init__(self,
@@ -189,12 +190,13 @@ class DiffusionModel(nn.Module):
                 sampled_mols = self.tokeniser.detokenise(tokens)
 
                 m = sampled_mols[0]
-                sampled_mol = m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m
-                sampled_mol = sampled_mol.replace('?', '')
-                sampled_mol = Chem.MolFromSmiles(sampled_mol)
+                
+                # sampled_mol = m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m
+                # sampled_mol = sampled_mol.replace('?', '')
+                # sampled_mol = Chem.MolFromSmiles(sampled_mol)
 
-                if sampled_mol is not None:
-                    m = Chem.MolToSmiles(sampled_mol)
+                # if sampled_mol is not None:
+                #     m = Chem.MolToSmiles(sampled_mol)
 
                 print(f'{t}: {m}')
 
