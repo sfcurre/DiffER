@@ -7,7 +7,6 @@ import torch.nn.functional as F
 
 from .diff_util import extract, log_sample_categorical, index_to_log_onehot, log_add_exp, SinusoidalPosEmb
 from rdkit import Chem, RDLogger
-import selfies as sf
 
 class DiffusionModel(nn.Module):
     def __init__(self,

@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rdkit import Chem, RDLogger
-import selfies as sf
 
 class DiffusionModelTrainer:
     def __init__(self, model, optimizer, name='Default', loss_components=['nll'], use_gpu=True):
@@ -229,9 +228,9 @@ class DiffusionModelTrainer:
 
     def _calc_sampling_metrics(self, batch_input, sampled_smiles):
         target_smiles = batch_input['target_smiles']
-        mol_targets = [Chem.MolFromSmiles(sf.decoder(smi)) for smi in target_smiles]
+        mol_targets = [Chem.MolFromSmiles(smi) for smi in target_smiles]
         canon_targets = [Chem.MolToSmiles(mol) for mol in mol_targets]
-        sampled_mols = [Chem.MolFromSmiles(sf.decoder(smi)) for smi in sampled_smiles]
+        sampled_mols = [Chem.MolFromSmiles(smi) for smi in sampled_smiles]
         invalid = [mol is None for mol in sampled_mols]
 
         canon_smiles = ["Unknown" if mol is None else Chem.MolToSmiles(mol) for mol in sampled_mols]

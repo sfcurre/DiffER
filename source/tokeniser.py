@@ -1,7 +1,6 @@
 import re
-# import torch
+import torch
 import random
-import selfies as sf
 from pathlib import Path
 
 
@@ -17,7 +16,6 @@ DEFAULT_MASK_SCHEME = "span"
 DEFAULT_SPAN_LAMBDA = 3.0
 
 REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9]|<MASK>|<PAD>|<SEP>"
-# REGEX = "\.|\?|\^|\&|<MASK>|<PAD>|<SEP>|.*?]"
 
 class MolEncTokeniser:
     def __init__(
