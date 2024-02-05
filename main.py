@@ -20,7 +20,7 @@ from source.trainer import DiffusionModelTrainer
 
 # Default model hyperparams
 DEFAULT_D_MODEL = 512
-DEFAULT_NUM_LAYERS = 1
+DEFAULT_NUM_LAYERS = 6
 DEFAULT_NUM_HEADS = 8
 DEFAULT_D_FEEDFORWARD = 2048
 DEFAULT_ACTIVATION = "gelu"
