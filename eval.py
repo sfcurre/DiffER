@@ -147,7 +147,16 @@ def main():
     
     chains = np.array(chains)
     np.save(f"{args.name}_sample_chains.npy", chains)
-   
+
+    #single loader
+    dataset = RSmilesUspto50(args.data_path, 'val', args.aug_prob, forward=forward_pred)
+    singles_loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    for i, batch in enumerate(singles_loader):
+        if i >= 10:
+            break
+        for _ in range(10):
+            sampled_mol, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
+            print(sampled_mol)
 
 if __name__ == '__main__':
     main()
