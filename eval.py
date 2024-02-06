@@ -152,16 +152,19 @@ def main():
     chains = np.array(chains)
     np.save(f"{args.name}_sample_chains.npy", chains)
 
-    #single loader
-    dataset = RSmilesUspto50(args.data_path, 'val', args.aug_prob, forward=forward_pred)
-    singles_loader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
-    for i, batch in enumerate(singles_loader):
-        if i >= 10:
-            break
-        trainer.move_batch_to_gpu(batch)
-        for _ in range(10):
-            sampled_mol, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
-            print(sampled_mol)
+    batch = next(dataloaders['val'])
+    targets = [[] for _ in batch['target_smiles']]
+    trainer.move_batch_to_gpu(batch)
+    for _ in range(10):
+        sampled_mols, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
+        for i, smi in enumerate(sampled_mols):
+            targets[i].append(smi)
+    
+    for i, target in enumerate(batch['target_smiles']):
+        print(f'Target: {target}')
+        print(f'Samples:')
+        for smi in sampled_mols[i]:
+            print(f'\t{smi}')
 
 if __name__ == '__main__':
     main()
