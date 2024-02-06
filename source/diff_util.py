@@ -20,6 +20,7 @@ def log_sample_categorical(logits, num_classes):
     gumbel_noise = -torch.log(-torch.log(uniform + 1e-30) + 1e-30)
     sample = (gumbel_noise + logits).argmax(dim=1)
     log_sample = index_to_log_onehot(sample, num_classes)
+    #log_sample = gumbel_noise + logits
     return log_sample
 
 def index_to_log_onehot(x, num_classes):
@@ -299,7 +300,8 @@ class DiffusionCollater:
             raise ValueError
         
     def update_Lt(self, t, kl):
-        Lt2 = kl.pow(2)
+        Lt2 = kl.pow(2).cpu()
+        t = t.cpu()
         Lt2_prev = self.Lt_history.gather(dim=0, index=t)
         new_Lt_history = (0.1 * Lt2 + 0.9 * Lt2_prev).detach()
         self.Lt_history.scatter_(dim=0, index=t, src=new_Lt_history)

@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from pysmilesutils.augment import SMILESAugmenter
 
 class RSmilesUspto50(torch.utils.data.Dataset):
-    def __init__(self, data_path, split='train', aug_prob=0.0, forward=True, use_canonical=False, use_selfies=True):
+    def __init__(self, data_path, split='train', aug_prob=0.0, forward=True, use_canonical=False, use_selfies=False):
         self.path = Path(data_path)
         reactants, products = self.read_data_dir(self.path, 'train')
 

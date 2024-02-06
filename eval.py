@@ -24,7 +24,7 @@ DEFAULT_NUM_LAYERS = 6
 DEFAULT_NUM_HEADS = 8
 DEFAULT_D_FEEDFORWARD = 2048
 DEFAULT_ACTIVATION = "gelu"
-DEFAULT_MAX_SEQ_LEN = 512
+DEFAULT_MAX_SEQ_LEN = 256
 DEFAULT_DROPOUT = 0.1
 
 DEFAULT_CHEM_TOKEN_START = 272
@@ -61,6 +61,10 @@ def parse_args():
     parser.add_argument("--gpus", type=int, default=DEFAULT_GPUS)
     
     parser.add_argument("--num_timesteps", type=int, default=1000)
+    parser.add_argument("--diffuseq", action='store_true')
+
+    parser.add_argument("--beta_schedule", type=str, default='cosine')
+    parser.add_argument("--loss_terms", type=str, default='nll')
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=None)
@@ -93,7 +97,7 @@ def main():
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // args.gpus
     
-    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred)
+    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, beta_schedule=args.beta_schedule)
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(args.data_path, split, args.aug_prob, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
@@ -119,7 +123,7 @@ def main():
         model = model.cuda()
  
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    trainer = DiffusionModelTrainer(model, optimizer, args.name, use_gpu=use_gpu)
+    trainer = DiffusionModelTrainer(model, optimizer, args.name, loss_components=args.loss_terms.split(','), use_gpu=use_gpu)
 
     if os.path.exists(f'out/metrics/{args.name}_metrics_log.txt'):
         os.remove(f'out/metrics/{args.name}_metrics_log.txt')
@@ -154,6 +158,7 @@ def main():
     for i, batch in enumerate(singles_loader):
         if i >= 10:
             break
+        trainer.move_batch_to_gpu(batch)
         for _ in range(10):
             sampled_mol, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
             print(sampled_mol)
