@@ -44,6 +44,7 @@ class DiffusionModel(nn.Module):
 
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
         self.time_emb = SinusoidalPosEmb(d_model, num_timesteps)
+        self.embed_lengths = nn.Embedding(self.max_seq_len, self.d_model)
         self.dropout = nn.Dropout(dropout)
 
         enc_norm = nn.LayerNorm(d_model)
@@ -89,14 +90,14 @@ class DiffusionModel(nn.Module):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         
-        memory = self.encode(encoder_input, encoder_pad_mask)
+        memory, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
         
         decoder_input = batch["decoder_input"]
         decoder_pad_mask = batch["decoder_pad_mask"].transpose(0, 1)
         t = batch["decoder_t"]
         
         token_output = self.decode(decoder_input, decoder_pad_mask, memory, encoder_pad_mask, t)
-        return token_output
+        return token_output, predicted_lengths
 
     def embed_log_onehot(self, log_onehot_input, t=None):
         seq_len, _, _ = tuple(log_onehot_input.size())
@@ -115,8 +116,18 @@ class DiffusionModel(nn.Module):
 
     def encode(self, encoder_input, encoder_pad_mask):
         encoder_embs = self.embed_log_onehot(encoder_input)
+        
+        len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32))
+        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
+        encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
+
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
-        return model_output
+
+        predicted_lengths_logits = torch.matmul(model_output[0, :, :], self.embed_lengths.weight.transpose(0, 1)).float()
+        predicted_lengths_logits[:, 0] += float('-inf')   # Cannot predict the len_token
+        predicted_lengths = F.log_softmax(predicted_lengths_logits, dim=-1)
+
+        return model_output, predicted_lengths
 
     def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask, t):
         decoder_embs = self.embed_log_onehot(decoder_input, t)
@@ -133,7 +144,6 @@ class DiffusionModel(nn.Module):
         return token_output
 
     def get_lengths_from_padding(self, pad_mask):
-        pad_mask = pad_mask.transpose(0, 1)
         lengths = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
         return lengths.squeeze()
 
@@ -155,9 +165,9 @@ class DiffusionModel(nn.Module):
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
-        memory = self.encode(encoder_input, encoder_pad_mask)
+        memory, lengths = self.encode(encoder_input, encoder_pad_mask)
 
-        lengths = self.get_lengths_from_padding(batch['target_mask'].transpose(0, 1))
+        # lengths = self.get_lengths_from_padding(batch['target_mask'])
         tgt_tokens, length_mask = self.init_noise(lengths)
 
         if use_gpu:
