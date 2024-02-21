@@ -143,7 +143,7 @@ class DiffusionModelTrainer:
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),
-                       length_loss=length_loss.cpu()
+                       length_loss=length_loss.cpu(),
                        token_accuracy=token_acc,
                        perplexity=perplexity,
                        mol_accuracy=sampling_metrics['accuracy'],
