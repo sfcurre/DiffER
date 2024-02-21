@@ -41,7 +41,6 @@ DEFAULT_LR = 0.001
 DEFAULT_WEIGHT_DECAY = 0.0
 DEFAULT_EPOCHS = 50
 DEFAULT_AUG_PROB = 0.0
-DEFAULT_DOWNSTREAM_VOCAB_PATH = "submodules/Chemformer/bart_vocab_downstream.txt"
 
 def parse_args():
     parser = argparse.ArgumentParser()
