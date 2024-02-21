@@ -12,6 +12,7 @@ from source.tokeniser import load_tokeniser_from_rsmiles
 from source.diff_model import DiffusionModel
 from source.trainer import DiffusionModelTrainer
 
+import json
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -62,12 +63,14 @@ def parse_args():
     
     parser.add_argument("--num_timesteps", type=int, default=1000)
     parser.add_argument("--diffuseq", action='store_true')
+    parser.add_argument("--verbose", action='store_true')
+    parser.add_argument("--num_samples", type=int, default=20)
 
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
 
     # For debugging
-    parser.add_argument("--batch_limit", type=int, default=None)
+    parser.add_argument("--batch_limit", type=int, default=-1)
 
     # Rand init model args
     parser.add_argument("--d_model", type=int, default=DEFAULT_D_MODEL)
@@ -138,33 +141,49 @@ def main():
     with torch.no_grad():
         trainer.print_metrics(dataloaders['val'], 'Eval', 10)
    
- 
     torch.manual_seed(1998) 
     chains = []
     for i, batch in enumerate(dataloaders['val']):
-        if i >= 10:
+        if i >= 1:
             break
     
         trainer.move_batch_to_gpu(batch)
-        _, _, sample_chain = model.sample(batch, verbose=False, use_gpu=True, return_chain=True) 
+        _, _, sample_chain = model.sample(batch, verbose=args.verbose, use_gpu=True, return_chain=True) 
         chains.append(sample_chain)
     
     chains = np.array(chains)
-    np.save(f"{args.name}_sample_chains.npy", chains)
+    np.save(f"out/samples/{args.name}/sample_chains.npy", chains)
 
-    batch = next(dataloaders['val'])
-    targets = [[] for _ in batch['target_smiles']]
-    trainer.move_batch_to_gpu(batch)
-    for _ in range(10):
-        sampled_mols, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
-        for i, smi in enumerate(sampled_mols):
-            targets[i].append(smi)
-    
-    for i, target in enumerate(batch['target_smiles']):
-        print(f'Target: {target}')
-        print(f'Samples:')
-        for smi in sampled_mols[i]:
-            print(f'\t{smi}')
+    torch.manual_seed(1998) 
+    all_targets = {}
+    for i, batch in enumerate(dataloaders['val']):
+        if args.batch_limit >= 0 and i >= args.batch_limit:
+            break
+
+        targets = {}
+        for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
+            targets[source] = {'target': target, 'samples':[]}
+
+        trainer.move_batch_to_gpu(batch)
+        for _ in range(args.num_samples):
+            sampled_mols, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
+            for j, smi in enumerate(sampled_mols):
+                targets[batch['encoder_smiles'][j]]['samples'].append(smi)
+     
+        if args.verbose:   
+            for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
+                print(f'Target: {target}')
+                print(f'Samples:')
+                for smi in targets[source]['samples']:
+                    print(f'\t{smi}')
+
+        print(f'Batch {i} complete.')
+        all_targets.update(targets)
+
+    with open(f"out/samples/{args.name}/repeated_samples.json", 'w') as fp:
+        json.dump(all_targets, fp)
+
+    print('Evaluation complete.')
 
 if __name__ == '__main__':
     main()

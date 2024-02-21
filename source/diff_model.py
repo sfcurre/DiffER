@@ -197,7 +197,8 @@ class DiffusionModel(nn.Module):
                 if sampled_mol is not None:
                     m = Chem.MolToSmiles(sampled_mol)
 
-                print(f'{t}: {m}')
+                if verbose:
+                    print(f'{t}: {m}')
 
             if return_chain:
                 ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
