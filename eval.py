@@ -177,7 +177,14 @@ def main():
                     print(f'\t{smi}')
 
         print(f'Batch {i} complete.')
-        all_targets.update(targets)
+        
+        for source in targets:
+            if source in all_targets:
+                all_targets[source]['samples'].extend(targets[source]['samples'])
+            else:
+                all_targets[source] = targets[source]
+        
+        #all_targets.update(targets)
 
     with open(f"out/samples/{args.name}/repeated_samples.json", 'w') as fp:
         json.dump(all_targets, fp)
