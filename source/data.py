@@ -13,7 +13,7 @@ from pysmilesutils.augment import SMILESAugmenter
 class RSmilesUspto50(torch.utils.data.Dataset):
     def __init__(self, data_path, split='train', aug_prob=0.0, forward=True, use_canonical=False, use_selfies=False):
         self.path = Path(data_path)
-        reactants, products = self.read_data_dir(self.path, 'train')
+        reactants, products = self.read_data_dir(self.path, split)
 
         if len(reactants) != len(products):
             raise ValueError(f"There must be an equal number of reactants and products")
@@ -38,8 +38,9 @@ class RSmilesUspto50(torch.utils.data.Dataset):
 
     def transform(self, react, prod, type_token=None):
         react_str, prod_str = react.replace(' ', ''), prod.replace(' ', '')
-        react_str = self.aug(react_str)[0]
-        prod_str = self.aug(prod_str)[0]
+        if np.random.rand() < self.aug_prob:
+            react_str = self.aug(react_str)[0]
+            prod_str = self.aug(prod_str)[0]
 
         if self.use_selfies:
             react_str = sf.encoder(react_str)
