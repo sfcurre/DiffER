@@ -120,8 +120,9 @@ class DiffusionModelTrainer:
         self.model.train()
         self.optimizer.zero_grad()
         
-        output = self.model.forward(batch)
+        output, lengths = self.model.forward(batch)
         loss = self._calc_loss(batch, output)['loss']
+        loss += self._calc_length_loss(batch, lengths)
         loss.backward()
 
         self.optimizer.step()
@@ -132,8 +133,9 @@ class DiffusionModelTrainer:
             self.move_batch_to_gpu(batch)
 
         self.model.eval()
-        output = self.model.forward(batch)
+        output, lengths = self.model.forward(batch)
         loss = self._calc_loss(batch, output)['loss']
+        length_loss = self._calc_length_loss(lengths)
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
@@ -141,6 +143,7 @@ class DiffusionModelTrainer:
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),
+                       length_loss=length_loss.cpu(),
                        token_accuracy=token_acc,
                        perplexity=perplexity,
                        mol_accuracy=sampling_metrics['accuracy'],
@@ -196,6 +199,12 @@ class DiffusionModelTrainer:
         loss_terms['loss'] = sum(loss_terms[term] for term in loss_terms)
 
         return loss_terms
+    
+    def _calc_length_loss(self, batch_input, pred_lengths):
+        pad_mask = batch_input['target_mask']
+        length_target = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
+        length_loss = -pred_lengths.gather(dim=-1, index=length_target)
+        return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):
         token_ids = batch_input["target"]
