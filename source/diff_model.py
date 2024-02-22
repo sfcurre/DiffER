@@ -90,13 +90,13 @@ class DiffusionModel(nn.Module):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         
-        memory, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
+        memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
         
         decoder_input = batch["decoder_input"]
         decoder_pad_mask = batch["decoder_pad_mask"].transpose(0, 1)
         t = batch["decoder_t"]
         
-        token_output = self.decode(decoder_input, decoder_pad_mask, memory, encoder_pad_mask, t)
+        token_output = self.decode(decoder_input, decoder_pad_mask, memory, memory_pad_mask, t)
         return token_output, predicted_lengths
 
     def embed_log_onehot(self, log_onehot_input, t=None):
@@ -117,7 +117,7 @@ class DiffusionModel(nn.Module):
     def encode(self, encoder_input, encoder_pad_mask):
         encoder_embs = self.embed_log_onehot(encoder_input)
         
-        len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32))
+        len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32).cuda())
         encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
 
@@ -127,7 +127,7 @@ class DiffusionModel(nn.Module):
         predicted_lengths_logits[:, 0] += float('-inf')   # Cannot predict the len_token
         predicted_lengths = F.log_softmax(predicted_lengths_logits, dim=-1)
 
-        return model_output, predicted_lengths
+        return model_output, encoder_pad_mask, predicted_lengths
 
     def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask, t):
         decoder_embs = self.embed_log_onehot(decoder_input, t)
@@ -165,10 +165,10 @@ class DiffusionModel(nn.Module):
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
-        memory, lengths = self.encode(encoder_input, encoder_pad_mask)
+        memory, memory_pad_mask, lengths = self.encode(encoder_input, encoder_pad_mask)
 
         # lengths = self.get_lengths_from_padding(batch['target_mask'])
-        tgt_tokens, length_mask = self.init_noise(lengths)
+        tgt_tokens, length_mask = self.init_noise(lengths.cpu())
 
         if use_gpu:
             tgt_tokens = tgt_tokens.cuda()
@@ -187,7 +187,7 @@ class DiffusionModel(nn.Module):
             if use_gpu:
                 t_tensor = t_tensor.cuda() 
             
-            token_output = self.decode(tgt_tokens, length_mask, memory, encoder_pad_mask, t_tensor)
+            token_output = self.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor)
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
             
             log_model_pred = self.q_posterior(log_x_start=log_token_output, log_x_t=tgt_tokens.permute((1, 2, 0)), t=t_tensor)
