@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=Retro-Diffusion
-#SBATCH --time=0:39:59
+#SBATCH --time=23:59:59
 #SBATCH --output="out/reports/Retro-Diffusion-Eval-%j.out"
 #SBATCH --account=PAS2170
 #SBATCH --nodes=1
@@ -19,5 +19,6 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-python eval.py --data_path data/USPTO_50K_PtoR_aug20 --task forward_prediction --name ForwardDiffusionEval --load out/models/ForwardDiffusionFinetune_34.pkl
+python eval.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --name BackwardDiffusionEvalT200Small --num_timesteps 200 --beta_schedule cosine --batch_size 64 \
+               --load out/models/BackwardDiffusion_VB+MSE_CosineBeta_Tsampling_LR0001_T200_Fine2_29.pkl --batch_limit 20 --num_samples 20
 
