@@ -165,8 +165,9 @@ class DiffusionModel(nn.Module):
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
-        memory, memory_pad_mask, lengths = self.encode(encoder_input, encoder_pad_mask)
+        memory, memory_pad_mask, pred_lengths = self.encode(encoder_input, encoder_pad_mask)
 
+        lengths = predicted_lengths.max(dim=-1)[1]
         # lengths = self.get_lengths_from_padding(batch['target_mask'])
         tgt_tokens, length_mask = self.init_noise(lengths.cpu())
 

@@ -135,7 +135,7 @@ class DiffusionModelTrainer:
         self.model.eval()
         output, lengths = self.model.forward(batch)
         loss = self._calc_loss(batch, output)['loss']
-        length_loss = self._calc_length_loss(lengths)
+        length_loss = self._calc_length_loss(batch, lengths)
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
