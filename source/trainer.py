@@ -208,8 +208,9 @@ class DiffusionModelTrainer:
             length_loss = -pred_lengths.gather(dim=-1, index=length_target)
         elif self.length_loss == 'weighted_sum':
             length_dist = torch.exp(pred_lengths)
-            length_indices = torch.range(0, length_dist.shape[-1]).reshape((-1, 0))
-            length_loss = (length_dist.matmul(length_indices) - length_target) ** 2
+            length_indices = torch.arange(0, length_dist.shape[-1], device='cuda').repeat(len(length_target), 1)
+            index_errors = (length_indices - length_target) ** 2
+            length_loss = length_dist.matmul(index_errors)
         return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):
