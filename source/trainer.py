@@ -10,11 +10,12 @@ import torch.nn.functional as F
 from rdkit import Chem, RDLogger
 
 class DiffusionModelTrainer:
-    def __init__(self, model, optimizer, name='Default', loss_components=['nll'], use_gpu=True):
+    def __init__(self, model, optimizer, name='Default', loss_components=['nll'], length_loss = 'weighted_sum', use_gpu=True):
         self.model = model
         self.optimizer = optimizer
         self.name = name
         self.loss = loss_components
+        self.length_loss = length_loss
         self.use_gpu = use_gpu
         
         RDLogger.DisableLog("rdApp.*")
@@ -203,7 +204,12 @@ class DiffusionModelTrainer:
     def _calc_length_loss(self, batch_input, pred_lengths):
         pad_mask = batch_input['target_mask']
         length_target = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
-        length_loss = -pred_lengths.gather(dim=-1, index=length_target)
+        if self.length_loss == 'cross_entropy':
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target)
+        elif self.length_loss == 'weighted_sum':
+            length_dist = torch.exp(pred_lengths)
+            length_indices = torch.range(0, length_dist.shape[-1]).reshape((-1, 0))
+            length_loss = (length_dist.matmul(length_indices) - length_target) ** 2
         return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):
