@@ -65,6 +65,7 @@ def parse_args():
 
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
+    parser.add_argument("--length_loss", type=str, default='weighted_sum')
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=None)
@@ -127,7 +128,8 @@ def main():
         model = model.cuda()
  
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    trainer = DiffusionModelTrainer(model, optimizer, args.name, loss_components=args.loss_terms.split(','), use_gpu=use_gpu)
+    trainer = DiffusionModelTrainer(model, optimizer, args.name, loss_components=args.loss_terms.split(','),
+                                    length_loss=args.length_loss, use_gpu=use_gpu)
 
     if os.path.exists(f'out/metrics/{args.name}_metrics_log.txt'):
         os.remove(f'out/metrics/{args.name}_metrics_log.txt')
