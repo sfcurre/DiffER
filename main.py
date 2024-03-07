@@ -39,7 +39,7 @@ DEFAULT_BATCH_SIZE = 64
 DEFAULT_LR = 0.001
 DEFAULT_WEIGHT_DECAY = 0.0
 DEFAULT_EPOCHS = 50
-DEFAULT_AUG_PROB = 1.0
+DEFAULT_AUG_PROB = 0.0
 DEFAULT_DOWNSTREAM_VOCAB_PATH = "submodules/Chemformer/bart_vocab_downstream.txt"
 
 def parse_args():
@@ -66,6 +66,7 @@ def parse_args():
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
     parser.add_argument("--length_loss", type=str, default='weighted_sum')
+    parser.add_argument("--pad_limit", type=int, default=20)
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=None)
@@ -98,7 +99,8 @@ def main():
     num_available_cpus = 1#len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // args.gpus
     
-    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, beta_schedule=args.beta_schedule)
+    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, max_seq_len=DEFAULT_MAX_SEQ_LEN,
+                                   beta_schedule=args.beta_schedule, pad_limit=args.pad_limit)
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(args.data_path, split, args.aug_prob, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)

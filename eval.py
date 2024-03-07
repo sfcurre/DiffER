@@ -67,6 +67,8 @@ def parse_args():
 
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
+    parser.add_argument("--true_lengths", action='store_true')
+    parser.add_argument("--pad_limit", type=int, default=None)
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=-1)
@@ -99,7 +101,8 @@ def main():
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // args.gpus
     
-    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, beta_schedule=args.beta_schedule)
+    collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, beta_schedule=args.beta_schedule,
+                                   max_seq_len=DEFAULT_MAX_SEQ_LEN, pad_limit=args.pad_limit)
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(args.data_path, split, args.aug_prob, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
@@ -147,7 +150,7 @@ def main():
             break
     
         trainer.move_batch_to_gpu(batch)
-        _, _, sample_chain = model.sample(batch, verbose=args.verbose, use_gpu=True, return_chain=True) 
+        _, _, sample_chain = model.sample(batch, verbose=args.verbose, use_gpu=True, return_chain=True, pred_lengths=not args.true_lengths) 
         chains.append(sample_chain)
     
     chains = np.array(chains)
@@ -161,14 +164,18 @@ def main():
 
         targets = {}
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
-            targets[source] = {'target': target, 'samples':[]}
+            targets[source] = {'target': target, 'samples':[], 'pred_lengths':[], 'true_lengths':[]}
 
         trainer.move_batch_to_gpu(batch)
         for _ in range(args.num_samples):
-            sampled_mols, _ = model.sample(batch, verbose=False, use_gpu=True, return_chain=False)
+            sampled_mols, _, pred_lengths, true_lengths = model.sample(batch, verbose=False, use_gpu=True, return_chain=False,
+                                                                       pred_lengths=not args.true_lengths, return_lengths=True)
+            
             for j, smi in enumerate(sampled_mols):
                 targets[batch['encoder_smiles'][j]]['samples'].append(smi)
-     
+                #targets[batch['encoder_smiles'][j]]['pred_lengths'].append(pred_lengths[j].tolist())     
+                #targets[batch['encoder_smiles'][j]]['true_lengths'].append(true_lengths[j].tolist())     
+
         if args.verbose:   
             for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
                 print(f'Target: {target}')
@@ -186,7 +193,7 @@ def main():
         
         #all_targets.update(targets)
 
-    with open(f"out/samples/{args.name}/repeated_samples.json", 'w') as fp:
+    with open(f"out/samples/{args.name}/{args.name}_repeated_samples.json", 'w') as fp:
         json.dump(all_targets, fp)
 
     print('Evaluation complete.')

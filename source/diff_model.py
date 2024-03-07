@@ -162,13 +162,20 @@ class DiffusionModel(nn.Module):
         tgt_tokens = (1 - length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, verbose=True, use_gpu=True, return_chain=False):
+    def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True, return_lengths=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
-        memory, memory_pad_mask, pred_lengths = self.encode(encoder_input, encoder_pad_mask)
-
-        lengths = predicted_lengths.max(dim=-1)[1]
-        # lengths = self.get_lengths_from_padding(batch['target_mask'])
+        memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
+            
+        true_lengths = self.get_lengths_from_padding(batch['target_mask'])
+        if pred_lengths:
+            lengths = predicted_lengths.max(dim=-1)[1]
+            #length_dist = torch.exp(predicted_lengths)
+            #length_indices = torch.arange(0, predicted_lengths.shape[-1], device='cuda').repeat(len(length_dist), 1)
+            #lengths = torch.ceil((length_dist * length_indices).sum(1)).int()
+        else:
+            lengths = true_lengths
+        
         tgt_tokens, length_mask = self.init_noise(lengths.cpu())
 
         if use_gpu:
@@ -229,6 +236,9 @@ class DiffusionModel(nn.Module):
 
         if return_chain:
             return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), chain
+
+        if return_lengths:
+            return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), predicted_lengths.detach().cpu().numpy(), true_lengths.cpu().numpy()
 
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])
 

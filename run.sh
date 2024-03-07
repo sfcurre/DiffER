@@ -19,11 +19,26 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles \
-#               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_29.pkl
+python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_T200_Rsmiles_VariantLCE15PrePost --pad_limit -15 --length_loss cross_entropy \
+               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_T200_Rsmiles_VariantL10_29.pkl
 
-python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200 \
-               --lr 0.0001 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_29.pkl
+#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_LenInPlus50 \
+#               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_LenInPlus50_29.pkl
+
+#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_VariantL_Fine1 \
+#               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine --load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_VariantL_Fine0_29.pkl
+
+#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_FullPadVariant_Fine0 \
+#               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine --load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_FullPadVariant_29.pkl
+
+#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_FullPad_Fine0 \
+#               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine --load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_FullPad_20.pkl
+
+#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200 \
+#               --lr 0.0001 --loss_terms mse,vb --length_loss weighted_sum --num_timesteps 200 --beta_schedule cosine --load out/models/BackwardDiffusion_VB+MSE+LLV_CosineBeta_Tsampling_LR0001_T200_29.pkl
+
+#python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE_CosineBeta_Tsampling_LR0001_T200_TrueL \
+#               --lr 0.0001 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_VB+MSE+LLV_CosineBeta_Tsampling_LR0001_T200_TrueL_29.pkl
 
 #python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE_CosineBeta_Tsampling_LR0001_T500_Fine2 \
 #               --lr 0.0001 --loss_terms mse,vb --num_timesteps 500 --beta_schedule cosine --load out/models/BackwardDiffusion_VB+MSE_CosineBeta_Tsampling_LR0001_T500_Fine1_29.pkl

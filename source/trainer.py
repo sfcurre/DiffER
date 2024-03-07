@@ -82,14 +82,14 @@ class DiffusionModelTrainer:
         # Testing
         return loss_values
 
-    def print_metrics(self, val_loader, epoch, val_limit):
+    def print_metrics(self, val_loader, epoch, val_limit, pred_lengths=True):
         self.model.eval()
         metrics = defaultdict(list)
         mols = []
         for i, batch in enumerate(val_loader):
             if i == val_limit:
                 break
-            batch_metrics, sampled_mols = self.val_step(batch)
+            batch_metrics, sampled_mols = self.val_step(batch, pred_lengths=pred_lengths)
             
             for j, sample in enumerate(sampled_mols):
                 data = {}
@@ -129,7 +129,7 @@ class DiffusionModelTrainer:
         self.optimizer.step()
         return loss.cpu().item()
 
-    def val_step(self, batch):
+    def val_step(self, batch, pred_lengths=True):
         if self.use_gpu:
             self.move_batch_to_gpu(batch)
 
@@ -140,7 +140,7 @@ class DiffusionModelTrainer:
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
-        sampled_smiles, lprobs = self.model.sample(batch, verbose=True, use_gpu=self.use_gpu)
+        sampled_smiles, lprobs = self.model.sample(batch, verbose=True, use_gpu=self.use_gpu, pred_lengths=pred_lengths)
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),
@@ -210,7 +210,7 @@ class DiffusionModelTrainer:
             length_dist = torch.exp(pred_lengths)
             length_indices = torch.arange(0, length_dist.shape[-1], device='cuda').repeat(len(length_target), 1)
             index_errors = (length_indices - length_target) ** 2
-            length_loss = length_dist.matmul(index_errors)
+            length_loss = (length_dist * index_errors).sum(1)
         return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):

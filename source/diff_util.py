@@ -171,10 +171,12 @@ class SinusoidalPosEmb(torch.nn.Module):
         return emb
 
 class DiffusionCollater:
-    def __init__(self, tokeniser, num_timesteps, forward_pred, beta_schedule='cosine'):
+    def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, beta_schedule='cosine', pad_limit=20):
         self.tokeniser = tokeniser
         self.num_timesteps = num_timesteps
         self.forward_pred = forward_pred
+        self.max_seq_len = max_seq_len
+        self.pad_limit = pad_limit
         
         # alphas = cosine_beta_schedule(num_timesteps)
         alphas = 1 - get_named_beta_schedule(beta_schedule, num_diffusion_timesteps=num_timesteps)
@@ -212,9 +214,16 @@ class DiffusionCollater:
             encoder_smiles = prods_smiles
             decoder_smiles = reacts_smiles
 
-        # # add some number of length-padding tokens
-        #decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, 10) for smi in decoder_smiles)
-        decoder_smiles_padded = decoder_smiles        
+        # add some number of length-padding tokens
+        
+        if self.pad_limit is None:
+            decoder_smiles_padded = tuple(smi + '?' * self.max_seq_len for smi in decoder_smiles)
+        elif self.pad_limit > 0: 
+            decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, self.pad_limit) for smi in decoder_smiles)
+        elif self.pad_limit == 0:
+            decoder_smiles_padded = decoder_smiles
+        else:
+            decoder_smiles_padded = tuple('?' * np.random.randint(1, -self.pad_limit) + smi + '?' * np.random.randint(1, -self.pad_limit) for smi in decoder_smiles)
 
         encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=True)
         decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)
@@ -251,6 +260,9 @@ class DiffusionCollater:
         input_token_ids = torch.tensor(input_token_ids)
         input_token_ids = index_to_log_onehot(input_token_ids, len(self.tokeniser))
         input_pad_mask = torch.tensor(input_mask, dtype=torch.bool).transpose(0, 1)
+
+        input_token_ids = input_token_ids[..., :self.max_seq_len]
+        input_pad_mask = input_pad_mask[:self.max_seq_len]
 
         if noised:
             #importance sample t
