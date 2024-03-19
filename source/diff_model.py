@@ -170,7 +170,7 @@ class DiffusionModel(nn.Module):
         true_lengths = self.get_lengths_from_padding(batch['target_mask'])
         if pred_lengths:
             lengths = predicted_lengths.max(dim=-1)[1] - 10
-            lengths = self.get_lengths_from_padding(batch['encoder_mask']) + lengths
+            lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + lengths
             #length_dist = torch.exp(predicted_lengths)
             #length_indices = torch.arange(0, predicted_lengths.shape[-1], device='cuda').repeat(len(length_dist), 1)
             #lengths = torch.ceil((length_dist * length_indices).sum(1)).int()

@@ -203,7 +203,7 @@ class DiffusionModelTrainer:
     
     def _calc_length_loss(self, batch_input, pred_lengths):
         pad_mask = batch_input['target_mask']
-        input_length = len(batch_input['encoder_mask']) - batch_input['encoder_mask'].sum(0).unsqueeze(-1)
+        input_length = len(batch_input['encoder_pad_mask']) - batch_input['encoder_pad_mask'].sum(0).unsqueeze(-1)
         length_target = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
         length_target = length_target - input_length
         if self.length_loss == 'cross_entropy':
