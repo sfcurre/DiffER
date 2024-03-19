@@ -19,8 +19,8 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_T200_Rsmiles_VariantLCE15PrePost --pad_limit -15 --length_loss cross_entropy \
-               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_T200_Rsmiles_VariantL10_29.pkl
+python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_T200_Rsmiles_VariantLDiff15 --pad_limit 15 --length_loss cross_entropy \
+               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_T200_Rsmiles_VariantLCE15PrePost_Fine1_29.pkl
 
 #python main.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --epochs 30 --name BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_LenInPlus50 \
 #               --lr 0.0001 --aug_prob 0.0 --loss_terms mse,vb --num_timesteps 200 --beta_schedule cosine #--load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_LenInPlus50_29.pkl

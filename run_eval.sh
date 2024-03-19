@@ -19,6 +19,6 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-python eval.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --name BackwardDiffusionEvalT200RsmilesVariantLPlus5Small --num_timesteps 200 --beta_schedule cosine --batch_size 64 \
-               --load out/models/BackwardDiffusion_VB+MSE+LL_CosineBeta_Tsampling_LR0001_T200_Rsmiles_VariantL_Fine1_29.pkl --batch_limit 20 --num_samples 20
+python eval.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --name BackwardDiffusionEvalT200RsmilesVariantLCE15PrePost --num_timesteps 200 --beta_schedule cosine --batch_size 64 \
+               --load out/models/BackwardDiffusion_T200_Rsmiles_VariantLCE15PrePost_Fine2_29.pkl --batch_limit 20 --num_samples 20
 

@@ -203,9 +203,11 @@ class DiffusionModelTrainer:
     
     def _calc_length_loss(self, batch_input, pred_lengths):
         pad_mask = batch_input['target_mask']
+        input_length = len(batch_input['encoder_mask']) - batch_input['encoder_mask'].sum(0).unsqueeze(-1)
         length_target = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
+        length_target = length_target - input_length
         if self.length_loss == 'cross_entropy':
-            length_loss = -pred_lengths.gather(dim=-1, index=length_target)
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target + 10)
         elif self.length_loss == 'weighted_sum':
             length_dist = torch.exp(pred_lengths)
             length_indices = torch.arange(0, length_dist.shape[-1], device='cuda').repeat(len(length_target), 1)
