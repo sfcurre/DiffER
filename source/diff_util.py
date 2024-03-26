@@ -215,20 +215,32 @@ class DiffusionCollater:
             decoder_smiles = reacts_smiles
 
         # add some number of length-padding tokens
-        
         if self.pad_limit is None:
             decoder_smiles_padded = tuple(smi + '?' * self.max_seq_len for smi in decoder_smiles)
-        elif self.pad_limit > 0: 
-            decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, self.pad_limit) for smi in decoder_smiles)
-        elif self.pad_limit == 0:
-            decoder_smiles_padded = decoder_smiles
-        else:
-            #temp_list = []
-            #for smi in decoder_smiles: 
-                #cutoff, extra = np.random.randint(0, -self.pad_limit), np.random.randint(0, -self.pad_limit)
-                #temp_list.append(smi[:-cutoff] + '?' * (cutoff + extra))
-            #decoder_smiles_padded = tuple(temp_list)
-            decoder_smiles_padded = tuple('?' * np.random.randint(1, -self.pad_limit) + smi + '?' * np.random.randint(1, -self.pad_limit) for smi in decoder_smiles)
+
+        elif isinstance(self.pad_limit, int):
+            if self.pad_limit > 0: 
+                decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, self.pad_limit) for smi in decoder_smiles)
+            elif self.pad_limit == 0:
+                decoder_smiles_padded = decoder_smiles
+            elif self.pad_limit < 0:
+                decoder_smiles_padded = tuple('?' * np.random.randint(1, -self.pad_limit) + smi + '?' * np.random.randint(1, -self.pad_limit) for smi in decoder_smiles)
+
+        elif isinstance(self.pad_limit, list):
+            encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=False)['original_tokens']
+            decoder_input = self.tokeniser.tokenise(decoder_smiles, mask=False, pad=False)['original_tokens']
+        
+            _, max_increase = min(self.pad_limit), max(self.pad_limit)
+            decoder_smiles_padded = []
+            for encoder_tokens, decoder_tokens in zip(encoder_input, decoder_input):
+                increase =  len(decoder_tokens) - len(encoder_tokens)
+                decoder_tokens.pop(0) # remove the start token
+                decoder_tokens.pop(-1) # remove end token
+                if increase < max_increase:
+                    decoder_tokens.extend(['?'] * (max_increase - increase))
+                elif increase > max_increase:
+                    decoder_tokens = decoder_tokens[:len(encoder_tokens) + max_increase]
+                decoder_smiles_padded.append(''.join(decoder_tokens))
 
         encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=True)
         decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)

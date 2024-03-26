@@ -123,8 +123,8 @@ class DiffusionModelTrainer:
         
         output, lengths = self.model.forward(batch)
         loss = self._calc_loss(batch, output)['loss']
-        loss += self._calc_length_loss(batch, lengths)
-        loss.backward()
+        total_loss = loss + self._calc_length_loss(batch, lengths)
+        total_loss.backward()
 
         self.optimizer.step()
         return loss.cpu().item()
@@ -213,6 +213,12 @@ class DiffusionModelTrainer:
             length_indices = torch.arange(0, length_dist.shape[-1], device='cuda').repeat(len(length_target), 1)
             index_errors = (length_indices - length_target) ** 2
             length_loss = (length_dist * index_errors).sum(1)
+        elif self.length_loss == 'focal':
+            gamma = 0.25
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target + 10)
+            length_dist = torch.exp(-length_loss)
+            focal_mod = (1 - length_dist) ** gamma
+            length_loss *= focal_mod
         return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):

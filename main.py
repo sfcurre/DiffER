@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
     parser.add_argument("--length_loss", type=str, default='weighted_sum')
-    parser.add_argument("--pad_limit", type=int, default=20)
+    parser.add_argument("--pad_limit", nargs='+', type=int, default=None)
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=None)
@@ -82,6 +82,9 @@ def parse_args():
 #========================================================================
 def main():
     args = parse_args()
+
+    if args.pad_limit is not None and len(args.pad_limit) == 1:
+        args.pad_limit = args.pad_limit[0]
 
     print("Building tokeniser...")
     tokeniser = load_tokeniser_from_rsmiles(args.data_path)

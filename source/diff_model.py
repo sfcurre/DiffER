@@ -149,7 +149,7 @@ class DiffusionModel(nn.Module):
 
     def get_length_mask(self, lengths):
         max_len = lengths.max().item()
-        length_mask = torch.triu(torch.ones(max_len, max_len, dtype=torch.int32), 1)
+        length_mask = torch.triu(torch.ones(max_len, max_len, dtype=torch.bool), 1)
         length_mask = torch.stack([length_mask[lengths[batch] - 1] for batch in range(len(lengths))], dim=0)
         return length_mask.squeeze()
 
@@ -159,7 +159,7 @@ class DiffusionModel(nn.Module):
         tgt_tokens = log_sample_categorical(uniform_logits, len(self.tokeniser)).permute(2, 0, 1)
         
         pad_token =  index_to_log_onehot(torch.tensor([[self.pad_token_idx]]), len(self.tokeniser)).permute(2, 0, 1)
-        tgt_tokens = (1 - length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
+        tgt_tokens = (~length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True, return_lengths=False):
@@ -194,7 +194,7 @@ class DiffusionModel(nn.Module):
             # MultiDiffusion code likes (batch, tokens, time)
             t_tensor = torch.full((length_mask.shape[0],), t)
             if use_gpu:
-                t_tensor = t_tensor.cuda() 
+                t_tensor = t_tensor.cuda()
             
             token_output = self.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor)
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
