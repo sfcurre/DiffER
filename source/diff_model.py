@@ -162,7 +162,7 @@ class DiffusionModel(nn.Module):
         tgt_tokens = (~length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True, return_lengths=False):
+    def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True, return_lengths=False, diffuse_timesteps=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
@@ -197,8 +197,18 @@ class DiffusionModel(nn.Module):
                 t_tensor = t_tensor.cuda()
             
             token_output = self.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor)
+            if diffuse_timesteps:
+                #time, batch, tokens
+                add_index = self.tokeniser.vocab['<ADD>']
+                max_tokens = token_output.max(dim=-1)[1]
+                add_indicator = max_tokens == add_index
+                lengths = self.get_lengths_from_padding(length_mask)
+                added_lengths = lengths + add_indicator
+                batch_idx = torch.range(0, len(length_mask))
+                token_output[added_lengths, batch_idx] = token_output[lengths, batch_idx]
+                length_mask[batch_idx, added_lengths] = False
+
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))
-            
             log_model_pred = self.q_posterior(log_x_start=log_token_output, log_x_t=tgt_tokens.permute((1, 2, 0)), t=t_tensor)
             tgt_tokens = log_sample_categorical(log_model_pred, len(self.tokeniser)).permute((2, 0, 1))
 
