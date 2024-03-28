@@ -224,7 +224,8 @@ class DiffusionCollater:
             elif self.pad_limit == 0:
                 decoder_smiles_padded = decoder_smiles
             elif self.pad_limit < 0:
-                decoder_smiles_padded = tuple('?' * np.random.randint(1, -self.pad_limit) + smi + '?' * np.random.randint(1, -self.pad_limit) for smi in decoder_smiles)
+                decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, -self.pad_limit) for smi in decoder_smiles)
+                encoder_smiles = tuple(smi + '.' * ('.' in smid) for smi, smid in zip(encoder_smiles, decoder_smiles))
 
         elif isinstance(self.pad_limit, list):
             encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=False)['original_tokens']
