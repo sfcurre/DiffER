@@ -10,12 +10,13 @@ DEFAULT_PAD_TOKEN = "<PAD>"
 DEFAULT_UNK_TOKEN = "?"
 DEFAULT_MASK_TOKEN = "<MASK>"
 DEFAULT_SEP_TOKEN = "<SEP>"
+DEFAULT_ADD_TOKEN = "<ADD>"
 DEFAULT_MASK_PROB = 0.15
 DEFAULT_SHOW_MASK_TOKEN_PROB = 1.0
 DEFAULT_MASK_SCHEME = "span"
 DEFAULT_SPAN_LAMBDA = 3.0
 
-REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9]|<MASK>|<PAD>|<SEP>"
+REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9]|<MASK>|<PAD>|<SEP>|<ADD>"
 
 class MolEncTokeniser:
     def __init__(
@@ -29,6 +30,7 @@ class MolEncTokeniser:
         unk_token=DEFAULT_UNK_TOKEN,
         mask_token=DEFAULT_MASK_TOKEN,
         sep_token=DEFAULT_SEP_TOKEN,
+        add_token=DEFAULT_ADD_TOKEN,
         mask_prob=DEFAULT_MASK_PROB,
         show_mask_token_prob=DEFAULT_SHOW_MASK_TOKEN_PROB,
         mask_scheme=DEFAULT_MASK_SCHEME,
@@ -63,6 +65,7 @@ class MolEncTokeniser:
         self.unk_token = unk_token
         self.mask_token = mask_token
         self.sep_token = sep_token
+        self.add_token = add_token
 
         self.mask_prob = mask_prob
         self.show_mask_token_prob = show_mask_token_prob
@@ -149,6 +152,7 @@ class MolEncTokeniser:
         unk_token=DEFAULT_UNK_TOKEN,
         mask_token=DEFAULT_MASK_TOKEN,
         sep_token=DEFAULT_SEP_TOKEN,
+        add_token=DEFAULT_ADD_TOKEN,
         mask_prob=DEFAULT_MASK_PROB,
         show_mask_token_prob=DEFAULT_SHOW_MASK_TOKEN_PROB,
         mask_scheme=DEFAULT_MASK_SCHEME,
@@ -169,7 +173,8 @@ class MolEncTokeniser:
             begin_token: 2,
             end_token: 3,
             mask_token: 4,
-            sep_token: 5
+            sep_token: 5,
+            add_token: 6,
         }
 
         extra_tokens = [] if extra_tokens is None else extra_tokens
@@ -198,6 +203,7 @@ class MolEncTokeniser:
             unk_token=unk_token,
             mask_token=mask_token,
             sep_token=sep_token,
+            add_token=add_token,
             mask_prob=mask_prob,
             show_mask_token_prob=show_mask_token_prob,
             mask_scheme=mask_scheme,

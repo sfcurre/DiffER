@@ -171,12 +171,13 @@ class SinusoidalPosEmb(torch.nn.Module):
         return emb
 
 class DiffusionCollater:
-    def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, beta_schedule='cosine', pad_limit=20):
+    def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, beta_schedule='cosine', pad_limit=20, diffuse_length=False):
         self.tokeniser = tokeniser
         self.num_timesteps = num_timesteps
         self.forward_pred = forward_pred
         self.max_seq_len = max_seq_len
         self.pad_limit = pad_limit
+        self.diffuse_length = diffuse_length
         
         # alphas = cosine_beta_schedule(num_timesteps)
         alphas = 1 - get_named_beta_schedule(beta_schedule, num_diffusion_timesteps=num_timesteps)
@@ -215,6 +216,7 @@ class DiffusionCollater:
             decoder_smiles = reacts_smiles
 
         # add some number of length-padding tokens
+        
         if self.pad_limit is None:
             decoder_smiles_padded = tuple(smi + '?' * self.max_seq_len for smi in decoder_smiles)
 
@@ -234,22 +236,26 @@ class DiffusionCollater:
             _, max_increase = min(self.pad_limit), max(self.pad_limit)
             decoder_smiles_padded = []
             for encoder_tokens, decoder_tokens in zip(encoder_input, decoder_input):
-                increase =  len(decoder_tokens) - len(encoder_tokens)
-                decoder_tokens.pop(0) # remove the start token
-                decoder_tokens.pop(-1) # remove end token
+                increase = len(decoder_tokens) - len(encoder_tokens)
+                decoder_tokens = decoder_tokens[1:-1] # remove the start and end token
                 if increase < max_increase:
                     decoder_tokens.extend(['?'] * (max_increase - increase))
                 elif increase > max_increase:
-                    decoder_tokens = decoder_tokens[:len(encoder_tokens) + max_increase]
+                    decoder_tokens = decoder_tokens[:max_increase - increase]
                 decoder_smiles_padded.append(''.join(decoder_tokens))
+
+        t = None
+        if self.diffuse_length:
+            t, _ = self.sample_time(size=len(encoder_smiles), method='importance')
+            decoder_smiles_padded = self.diffuse_lengths(encoder_input, decoder_input, t)
 
         encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=True)
         decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)
         
         encoder_token_ids, encoder_pad_mask = self._partial_collate(encoder_input)
-        m_encoder_token_ids, m_encoder_pad_mask, m_encoder_t = self._partial_collate(encoder_input, noised=True)
+        # m_encoder_token_ids, m_encoder_pad_mask, m_encoder_t = self._partial_collate(encoder_input, noised=True)
         decoder_token_ids, decoder_pad_mask = self._partial_collate(decoder_input)
-        m_decoder_token_ids, m_decoder_pad_mask, m_decoder_t = self._partial_collate(decoder_input, noised=True)
+        m_decoder_token_ids, m_decoder_pad_mask, m_decoder_t = self._partial_collate(decoder_input, noised=True, t=t)
 
         collate_output = {
             "encoder_input": encoder_token_ids,
@@ -269,7 +275,7 @@ class DiffusionCollater:
         
         return collate_output
 
-    def _partial_collate(self, inputs, noised=False):
+    def _partial_collate(self, inputs, noised=False, t=None):
         input_tokens = inputs["original_tokens"]
         input_mask = inputs["original_pad_masks"]
         
@@ -284,7 +290,8 @@ class DiffusionCollater:
 
         if noised:
             #importance sample t
-            t, _ = self.sample_time(size=len(input_tokens), method='importance')
+            if t is None:
+                t, _ = self.sample_time(size=len(input_tokens), method='importance')
             input_token_ids = self.q_sample(input_token_ids, t)
             return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
         
@@ -305,6 +312,17 @@ class DiffusionCollater:
         )
 
         return log_probs
+    
+    def diffuse_lengths(self, encoder_input, decoder_input, t):
+        decoder_input_cutoff = []
+        for i, (source, target) in enumerate(zip(encoder_input, decoder_input)):
+            length_increase = len(encoder_input) - len(decoder_input)    
+            target_increase = length_increase * min(2 * t[i] / self.num_timesteps, 1)
+            target = target[1:-1][:int(len(encoder_input) + target_increase)]
+            if target_increase < length_increase:
+                target.append('<ADD>')
+            decoder_input_cutoff.append(target)
+        return decoder_input_cutoff
 
     def sample_time(self, size, method='uniform'):
         if method == 'importance':

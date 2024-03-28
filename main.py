@@ -67,6 +67,7 @@ def parse_args():
     parser.add_argument("--loss_terms", type=str, default='nll')
     parser.add_argument("--length_loss", type=str, default='weighted_sum')
     parser.add_argument("--pad_limit", nargs='+', type=int, default=None)
+    parser.add_argument("--diffuse_length", action='store_true')
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=None)
@@ -103,7 +104,7 @@ def main():
     num_workers = num_available_cpus // args.gpus
     
     collate_fn = DiffusionCollater(tokeniser, num_timesteps=args.num_timesteps, forward_pred=forward_pred, max_seq_len=DEFAULT_MAX_SEQ_LEN,
-                                   beta_schedule=args.beta_schedule, pad_limit=args.pad_limit)
+                                   beta_schedule=args.beta_schedule, pad_limit=args.pad_limit, diffuse_length=args.diffuse_length)
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(args.data_path, split, args.aug_prob, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
@@ -143,7 +144,8 @@ def main():
         os.mkdir(f'out/samples/{args.name}/')
 
     print(f'Training {args.name} with heuristics...')
-    trainer.train(dataloaders, args.epochs, args.epochs, report_interval=None, batch_limit=args.batch_limit, val_limit=10)
+    trainer.train(dataloaders, args.epochs, args.epochs, report_interval=None, batch_limit=args.batch_limit, val_limit=10,
+                  diffuse_timesteps=args.diffuse_timesteps)
 
 if __name__ == '__main__':
     main()
