@@ -21,7 +21,7 @@ class DiffusionModelTrainer:
         RDLogger.DisableLog("rdApp.*")
 
     def train(self, dataloaders, epochs, patience, report_interval=None, batch_limit=None, val_limit=100,
-              pred_lengths=True, diffuse_timesteps=False):
+              pred_lengths=True, diffuse_length=False):
         # Train model
         t_total = time.time()
         loss_values = []
@@ -41,13 +41,13 @@ class DiffusionModelTrainer:
                     print('Recording metrics...')
                     with torch.no_grad():
                         self.print_metrics(dataloaders['val'], str(epoch) + f'.{i+1} - {time.time() - t_total}', val_limit,
-                                           pred_lengths=pred_lengths, diffuse_timesteps=diffuse_timesteps)
+                                           pred_lengths=pred_lengths, diffuse_length=diffuse_length)
                     torch.save(self.model.state_dict(), 'out/models/{}_{}.pkl'.format(self.name, epoch))
                     np.save(f'out/losses/{self.name}_losses.npy', np.array(loss_values))
                     
             with torch.no_grad():
                 self.print_metrics(dataloaders['val'], str(epoch) + f'.{i+1} - {time.time() - t_total}', val_limit,
-                                           pred_lengths=pred_lengths, diffuse_timesteps=diffuse_timesteps)
+                                           pred_lengths=pred_lengths, diffuse_length=diffuse_length)
             torch.save(self.model.state_dict(), 'out/models/{}_{}.pkl'.format(self.name, epoch))
             np.save(f'out/losses/{self.name}_losses.npy', np.array(loss_values))
 
@@ -85,14 +85,14 @@ class DiffusionModelTrainer:
         # Testing
         return loss_values
 
-    def print_metrics(self, val_loader, epoch, val_limit, pred_lengths=True, diffuse_timesteps=False):
+    def print_metrics(self, val_loader, epoch, val_limit, pred_lengths=True, diffuse_length=False):
         self.model.eval()
         metrics = defaultdict(list)
         mols = []
         for i, batch in enumerate(val_loader):
             if i == val_limit:
                 break
-            batch_metrics, sampled_mols = self.val_step(batch, pred_lengths=pred_lengths, diffuse_timesteps=diffuse_timesteps)
+            batch_metrics, sampled_mols = self.val_step(batch, pred_lengths=pred_lengths, diffuse_length=diffuse_length)
             
             for j, sample in enumerate(sampled_mols):
                 data = {}
@@ -132,7 +132,7 @@ class DiffusionModelTrainer:
         self.optimizer.step()
         return loss.cpu().item()
 
-    def val_step(self, batch, pred_lengths=True, diffuse_timesteps=False):
+    def val_step(self, batch, pred_lengths=True, diffuse_length=False):
         if self.use_gpu:
             self.move_batch_to_gpu(batch)
 
@@ -144,7 +144,7 @@ class DiffusionModelTrainer:
         perplexity = self._calc_perplexity(batch, output)
 
         sampled_smiles, lprobs = self.model.sample(batch, verbose=True, use_gpu=self.use_gpu,
-                                                   pred_lengths=pred_lengths, diffuse_timesteps=diffuse_timesteps)
+                                                   pred_lengths=pred_lengths, diffuse_length=diffuse_length)
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),

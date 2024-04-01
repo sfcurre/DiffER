@@ -163,7 +163,7 @@ class DiffusionModel(nn.Module):
         return tgt_tokens, length_mask
 
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True,
-               return_lengths=False, diffuse_timesteps=False, clean=True):
+               return_lengths=False, diffuse_length=False, clean=True, length_diff=None):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
@@ -178,6 +178,9 @@ class DiffusionModel(nn.Module):
         else:
             lengths = true_lengths
         
+        if length_diff is not None:
+            lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + length_diff
+
         tgt_tokens, length_mask = self.init_noise(lengths.cpu())
 
         if use_gpu:
@@ -198,7 +201,7 @@ class DiffusionModel(nn.Module):
                 t_tensor = t_tensor.cuda()
             
             token_output = self.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor)
-            if diffuse_timesteps:
+            if diffuse_length:
                 #time, batch, tokens
                 add_index = self.tokeniser.vocab['<ADD>']
                 max_tokens = token_output.max(dim=-1)[1]

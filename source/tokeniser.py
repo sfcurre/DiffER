@@ -152,7 +152,7 @@ class MolEncTokeniser:
         unk_token=DEFAULT_UNK_TOKEN,
         mask_token=DEFAULT_MASK_TOKEN,
         sep_token=DEFAULT_SEP_TOKEN,
-        add_token=DEFAULT_ADD_TOKEN,
+        add_token=None,
         mask_prob=DEFAULT_MASK_PROB,
         show_mask_token_prob=DEFAULT_SHOW_MASK_TOKEN_PROB,
         mask_scheme=DEFAULT_MASK_SCHEME,
@@ -174,8 +174,9 @@ class MolEncTokeniser:
             end_token: 3,
             mask_token: 4,
             sep_token: 5,
-            add_token: 6,
         }
+        if add_token is not None:
+            vocab[add_token] = 6
 
         extra_tokens = [] if extra_tokens is None else extra_tokens
         [vocab.setdefault(token, len(vocab)) for token in extra_tokens]
@@ -420,7 +421,7 @@ class MolEncTokeniser:
         return padded, masks
 
 
-def load_tokeniser_from_rsmiles(data_path):
+def load_tokeniser_from_rsmiles(data_path, add_token=None):
     path = Path(data_path)
     product_path = path / 'train' / f'src-train.txt'
     reactant_path = path / 'train' / f'tgt-train.txt'
@@ -431,5 +432,5 @@ def load_tokeniser_from_rsmiles(data_path):
     with open(reactant_path) as fp:
         reactants = list(map(lambda x: x.strip().replace(' ', ''), fp.readlines()))
 
-    tokeniser = MolEncTokeniser.from_smiles(products + reactants, REGEX)
+    tokeniser = MolEncTokeniser.from_smiles(products + reactants, REGEX, add_token=add_token)
     return tokeniser
