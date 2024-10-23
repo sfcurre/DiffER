@@ -246,6 +246,8 @@ class DiffusionCollater:
 
         t = None
         if self.diffuse_length:
+            encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=False)['original_tokens']
+            decoder_input = self.tokeniser.tokenise(decoder_smiles, mask=False, pad=False)['original_tokens']
             t, _ = self.sample_time(size=len(encoder_smiles), method='importance')
             decoder_smiles_padded = self.diffuse_lengths(encoder_input, decoder_input, t)
 
@@ -315,13 +317,18 @@ class DiffusionCollater:
     
     def diffuse_lengths(self, encoder_input, decoder_input, t):
         decoder_input_cutoff = []
+        t = t.numpy()
+        print(t)
         for i, (source, target) in enumerate(zip(encoder_input, decoder_input)):
-            length_increase = len(encoder_input) - len(decoder_input)    
+            length_increase = len(encoder_input) - len(decoder_input)
             target_increase = length_increase * min(2 * t[i] / self.num_timesteps, 1)
-            target = target[1:-1][:int(len(encoder_input) + target_increase)]
-            if target_increase < length_increase:
+            print(target_increase)
+            if target_increase < length_increase and np.random.rand() < target_increase % 1:
+                target = target[1:-1][:int(len(encoder_input) + target_increase + 1)]
+            else:
+                target = target[1:-1][:int(len(encoder_input) + target_increase)]
                 target.append('<ADD>')
-            decoder_input_cutoff.append(target)
+            decoder_input_cutoff.append(''.join(target))
         return decoder_input_cutoff
 
     def sample_time(self, size, method='uniform'):

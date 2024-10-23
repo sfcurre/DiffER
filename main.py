@@ -88,7 +88,7 @@ def main():
         args.pad_limit = args.pad_limit[0]
 
     print("Building tokeniser...")
-    tokeniser = load_tokeniser_from_rsmiles(args.data_path)
+    tokeniser = load_tokeniser_from_rsmiles(args.data_path, add_token='<ADD>' if args.diffuse_length else None)
     print(f"Finished tokeniser with {len(tokeniser)} tokens.")
     
     if args.task == "forward_prediction":
@@ -145,7 +145,7 @@ def main():
 
     print(f'Training {args.name} with heuristics...')
     trainer.train(dataloaders, args.epochs, args.epochs, report_interval=None, batch_limit=args.batch_limit, val_limit=10,
-                  diffuse_timesteps=args.diffuse_timesteps)
+                  diffuse_length=args.diffuse_length)
 
 if __name__ == '__main__':
     main()

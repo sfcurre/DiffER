@@ -69,6 +69,7 @@ def parse_args():
     parser.add_argument("--loss_terms", type=str, default='nll')
     parser.add_argument("--true_lengths", action='store_true')
     parser.add_argument("--pad_limit", type=int, default=None)
+    parser.add_argument("--length_diff", type=int, nargs='+', default=None)
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=-1)
@@ -143,18 +144,18 @@ def main():
     with torch.no_grad():
         trainer.print_metrics(dataloaders['val'], 'Eval', 10)
    
-    torch.manual_seed(1998) 
-    chains = []
-    for i, batch in enumerate(dataloaders['val']):
-        if i >= 1:
-            break
+    # torch.manual_seed(1998) 
+    # chains = []
+    # for i, batch in enumerate(dataloaders['val']):
+    #     if i >= 1:
+    #         break
     
-        trainer.move_batch_to_gpu(batch)
-        _, _, sample_chain = model.sample(batch, verbose=args.verbose, use_gpu=True, return_chain=True, pred_lengths=not args.true_lengths) 
-        chains.append(sample_chain)
+    #     trainer.move_batch_to_gpu(batch)
+    #     _, _, sample_chain = model.sample(batch, verbose=args.verbose, use_gpu=True, return_chain=True, pred_lengths=not args.true_lengths) 
+    #     chains.append(sample_chain)
     
-    chains = np.array(chains)
-    np.save(f"out/samples/{args.name}/sample_chains.npy", chains)
+    # chains = np.array(chains)
+    # np.save(f"out/samples/{args.name}/sample_chains.npy", chains)
 
     torch.manual_seed(1998) 
     all_targets = {}
@@ -166,10 +167,19 @@ def main():
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[], 'pred_lengths':[], 'true_lengths':[]}
 
+        range_ = range(args.num_samples)
+        if args.length_diff is not None:
+            range_ = []
+            for diff in range(*args.length_diff):
+                for s in range(args.num_samples):
+                    range_.append(diff)
+
         trainer.move_batch_to_gpu(batch)
-        for _ in range(args.num_samples):
+        for i in range_:
+            length_diff = None if args.length_diff is None else i
             sampled_mols, _, pred_lengths, true_lengths = model.sample(batch, verbose=False, use_gpu=True, return_chain=False,
-                                                                       pred_lengths=not args.true_lengths, return_lengths=True)
+                                                                       pred_lengths=not args.true_lengths, return_lengths=True,
+                                                                       clean=False, length_diff=length_diff)
             
             for j, smi in enumerate(sampled_mols):
                 targets[batch['encoder_smiles'][j]]['samples'].append(smi)
