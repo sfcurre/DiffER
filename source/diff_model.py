@@ -163,7 +163,7 @@ class DiffusionModel(nn.Module):
         return tgt_tokens, length_mask
 
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True,
-               return_lengths=False, diffuse_length=False, clean=True, length_diff=None):
+               return_lengths=False, diffuse_length=False, clean=True, length_diff=None, return_memory=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
@@ -252,6 +252,11 @@ class DiffusionModel(nn.Module):
 
         if return_chain:
             return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), chain
+
+        if return_memory:
+            mem_length = self.get_lengths_from_padding(memory_pad_mask)
+            memories = [mem_length[:length, i].cpu().numpy() for i, length in enumerate(mem_length)]
+            return sampled_mols, memories
 
         if return_lengths:
             return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), predicted_lengths.detach().cpu().numpy(), true_lengths.cpu().numpy()
