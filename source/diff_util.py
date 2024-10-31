@@ -216,18 +216,18 @@ class DiffusionCollater:
             decoder_smiles = reacts_smiles
 
         # add some number of length-padding tokens
+        lpad_token = '?' #self.tokeniser.unk_token #end_token
         
         if self.pad_limit is None:
-            decoder_smiles_padded = tuple(smi + '?' * self.max_seq_len for smi in decoder_smiles)
+            decoder_smiles_padded = decoder_smiles
 
         elif isinstance(self.pad_limit, int):
             if self.pad_limit > 0: 
-                decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, self.pad_limit) for smi in decoder_smiles)
+                decoder_smiles_padded = tuple(smi + lpad_token * np.random.randint(1, self.pad_limit) for smi in decoder_smiles)
             elif self.pad_limit == 0:
                 decoder_smiles_padded = decoder_smiles
-            elif self.pad_limit < 0:
-                decoder_smiles_padded = tuple(smi + '?' * np.random.randint(1, -self.pad_limit) for smi in decoder_smiles)
-                encoder_smiles = tuple(smi + '.' * ('.' in smid) for smi, smid in zip(encoder_smiles, decoder_smiles))
+            elif self.pad_limit == -1:
+                decoder_smiles_padded = tuple(smi + lpad_token * self.max_seq_len for smi in decoder_smiles)
 
         elif isinstance(self.pad_limit, list):
             encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=False)['original_tokens']
@@ -239,7 +239,7 @@ class DiffusionCollater:
                 increase = len(decoder_tokens) - len(encoder_tokens)
                 decoder_tokens = decoder_tokens[1:-1] # remove the start and end token
                 if increase < max_increase:
-                    decoder_tokens.extend(['?'] * (max_increase - increase))
+                    decoder_tokens.extend([lpad_token] * (max_increase - increase))
                 elif increase > max_increase:
                     decoder_tokens = decoder_tokens[:max_increase - increase]
                 decoder_smiles_padded.append(''.join(decoder_tokens))
@@ -258,7 +258,8 @@ class DiffusionCollater:
         # m_encoder_token_ids, m_encoder_pad_mask, m_encoder_t = self._partial_collate(encoder_input, noised=True)
         decoder_token_ids, decoder_pad_mask = self._partial_collate(decoder_input)
         m_decoder_token_ids, m_decoder_pad_mask, m_decoder_t = self._partial_collate(decoder_input, noised=True, t=t)
-
+        
+        pad_index = self.tokeniser.vocab[lpad_token]
         collate_output = {
             "encoder_input": encoder_token_ids,
             "encoder_pad_mask": encoder_pad_mask,
@@ -268,6 +269,7 @@ class DiffusionCollater:
             "target_onehots": decoder_token_ids,
             "target_mask": decoder_pad_mask,
             "target_smiles": decoder_smiles,
+            "target_padding": (decoder_token_ids == pad_index).sum(dim=0),
             # "masked_encoder_input": m_encoder_token_ids,
             # "masked_encoder_pad_mask": m_encoder_pad_mask,
             "encoder_smiles": encoder_smiles,

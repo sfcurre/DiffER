@@ -7,11 +7,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
-from source.diff_util import DiffusionCollater
+from source.diff_util import DiffusionCollater, log_sample_categorical
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.diff_model import DiffusionModel
 from source.trainer import DiffusionModelTrainer
 
+from collections import defaultdict
 import json
 
 # torch.autograd.set_detect_anomaly(True)
@@ -51,6 +52,7 @@ def parse_args():
     parser.add_argument("--name", type=str)
 
     parser.add_argument("--load", type=str, default='')
+    parser.add_argument("--ensemble", type=str, nargs='+', default=[])
 
     # Model and training args
     parser.add_argument("--batch_size", type=int, default=DEFAULT_BATCH_SIZE)
@@ -63,13 +65,15 @@ def parse_args():
     parser.add_argument("--num_timesteps", type=int, default=1000)
     parser.add_argument("--diffuseq", action='store_true')
     parser.add_argument("--verbose", action='store_true')
-    parser.add_argument("--num_samples", type=int, default=20)
+    parser.add_argument("--num_samples", type=int, default=1)
 
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
     parser.add_argument("--true_lengths", action='store_true')
     parser.add_argument("--pad_limit", type=int, default=None)
     parser.add_argument("--length_diff", type=int, nargs='+', default=None)
+    parser.add_argument("--run_test", action='store_true')
+    parser.add_argument("--diversify", action='store_true')
 
     # For debugging
     parser.add_argument("--batch_limit", type=int, default=-1)
@@ -82,6 +86,25 @@ def parse_args():
 
     return parser.parse_args()
 
+
+def get_annealing_function(t1, t2, maxt, scaling_factor, mixing_factor):
+    t1, t2 = t1 * maxt, t2 * maxt
+    def func(memory, t):
+        gamma = 0
+        if t <= t1:
+            gamma = 1
+        elif t <= t2:
+            gamma = (t2 - t) / (t2 - t1)
+
+        noise = torch.randn_like(memory, device='cuda')
+        new_mem = np.sqrt(gamma) * memory + scaling_factor * np.sqrt(1 - gamma) * noise
+        # print(memory.shape, new_mem.shape)
+        new_mem_scaled = ((new_mem - new_mem.mean(dim=(0, 2), keepdim=True)) / (new_mem.std(dim=(0, 2), keepdim=True))) * memory.std(dim=(0, 2), keepdim=True) + memory.mean(dim=(0, 2), keepdim=True)
+        new_mem_mixed = mixing_factor * new_mem_scaled + (1 - mixing_factor) * new_mem
+        return new_mem_mixed
+    return func
+
+
 #========================================================================
 def main():
     args = parse_args()
@@ -89,6 +112,8 @@ def main():
     print("Building tokeniser...")
     tokeniser = load_tokeniser_from_rsmiles(args.data_path)
     print("Finished tokeniser.")
+
+    DATASET = 'test' if args.run_test else 'val'
     
     if args.task == "forward_prediction":
         forward_pred = True
@@ -123,7 +148,26 @@ def main():
     )
    
     if args.load:
-        model.load_state_dict(torch.load(args.load))
+        if args.ensemble:
+            state_dicts = [torch.load(args.load + mod_file) for mod_file in args.ensemble]
+            weights = [1.0 / len(state_dicts)] * len(state_dicts)
+            with torch.no_grad():
+                averaged = {}
+                for key in state_dicts[0]:
+                    averaged[key] = torch.sum(
+                        torch.stack(
+                        [
+                            sd[key] * weight
+                            for sd, weight in zip(state_dicts, weights)
+                        ]
+                        ),
+                        axis=0,
+                    )
+                state_dict = averaged
+        
+        else:
+            state_dict = torch.load(args.load)
+        model.load_state_dict(state_dict)
 
     if use_gpu:
         model = model.cuda()
@@ -142,7 +186,7 @@ def main():
    
     torch.manual_seed(1998) 
     with torch.no_grad():
-        trainer.print_metrics(dataloaders['val'], 'Eval', 10)
+        trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
    
     # torch.manual_seed(1998) 
     # chains = []
@@ -159,13 +203,13 @@ def main():
 
     torch.manual_seed(1998) 
     all_targets = {}
-    for i, batch in enumerate(dataloaders['val']):
+    for i, batch in enumerate(dataloaders[DATASET]):
         if args.batch_limit >= 0 and i >= args.batch_limit:
             break
 
         targets = {}
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
-            targets[source] = {'target': target, 'samples':[], 'pred_lengths':[], 'true_lengths':[]}
+            targets[source] = {'target': target, 'samples':[], 'confidence':[], 'length':[], 'length_confidence':[]}
 
         range_ = range(args.num_samples)
         if args.length_diff is not None:
@@ -174,17 +218,30 @@ def main():
                 for s in range(args.num_samples):
                     range_.append(diff)
 
+        annealing_function = None
+        if args.diversify:
+            annealing_function = get_annealing_function(0.8, 1.0, 
+                                                        args.num_timesteps,
+                                                        scaling_factor=0.0001,
+                                                        mixing_factor=1)
+
         trainer.move_batch_to_gpu(batch)
         for i in range_:
             length_diff = None if args.length_diff is None else i
-            sampled_mols, _, pred_lengths, true_lengths = model.sample(batch, verbose=False, use_gpu=True, return_chain=False,
+            sampled_mols, confidence, pred_length, length_confidence = model.sample(batch,
+                                                                       verbose=False,
+                                                                       use_gpu=True, 
+                                                                       return_chain=False,
                                                                        pred_lengths=not args.true_lengths, return_lengths=True,
-                                                                       clean=False, length_diff=length_diff)
-            
-            for j, smi in enumerate(sampled_mols):
+                                                                       clean=False, length_diff=length_diff,
+                                                                       annealing_schedule=annealing_function)
+
+            for j, (smi, con, leng, leng_con) in enumerate(zip(sampled_mols, confidence, pred_length, length_confidence)):
+                con, leng, leng_cond = con.astype(float), leng.astype(float), leng_con.astype(float)
                 targets[batch['encoder_smiles'][j]]['samples'].append(smi)
-                #targets[batch['encoder_smiles'][j]]['pred_lengths'].append(pred_lengths[j].tolist())     
-                #targets[batch['encoder_smiles'][j]]['true_lengths'].append(true_lengths[j].tolist())     
+                # targets[batch['encoder_smiles'][j]]['confidence'].append(con.tolist())
+                # targets[batch['encoder_smiles'][j]]['length'].append(leng.tolist())
+                # targets[batch['encoder_smiles'][j]]['length_confidence'].append(leng_cond.tolist())
 
         if args.verbose:   
             for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):

@@ -118,6 +118,7 @@ class DiffusionModel(nn.Module):
         encoder_embs = self.embed_log_onehot(encoder_input)
         
         len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32).cuda())
+        # len_tokens = self.embed_lengths(encoder_pad_mask.sum(-1).unsqueeze(-1)) # input to embedding is source length
         encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
 
@@ -163,15 +164,27 @@ class DiffusionModel(nn.Module):
         return tgt_tokens, length_mask
 
     def sample(self, batch, verbose=True, use_gpu=True, return_chain=False, pred_lengths=True,
-               return_lengths=False, diffuse_length=False, clean=True, length_diff=None, return_memory=False):
+               return_lengths=False, diffuse_length=False, clean=True, length_diff=None, annealing_schedule=None, noise_sampler = None, return_memory=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
             
         true_lengths = self.get_lengths_from_padding(batch['target_mask'])
         if pred_lengths:
+            # lengths = torch.multinomial(torch.exp(predicted_lengths), num_samples=1).squeeze() - 10
             lengths = predicted_lengths.max(dim=-1)[1] - 10
+            # lengths = predicted_lengths.max(dim=-1)[1]
+            lengths[lengths > 100] = lengths[lengths > 100] - 256
             lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + lengths
+            
+            if self.collate_fn.pad_limit == -1:
+                lengths[:] = self.max_seq_len
+            
+            # if self.collate_fn.pad_limit is not None:
+            #     if self.collate_fn.pad_limit > 0:
+            #         lengths += torch.randint_like(lengths, self.collate_fn.pad_limit)
+            #     elif self.collate_fn.pad_limit == -1:
+            #         lengths[:] = self.max_seq_len
             #length_dist = torch.exp(predicted_lengths)
             #length_indices = torch.arange(0, predicted_lengths.shape[-1], device='cuda').repeat(len(length_dist), 1)
             #lengths = torch.ceil((length_dist * length_indices).sum(1)).int()
@@ -182,6 +195,8 @@ class DiffusionModel(nn.Module):
             lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + length_diff
 
         tgt_tokens, length_mask = self.init_noise(lengths.cpu())
+        if noise_sampler is not None:
+            tgt_tokens = noise_sampler(tgt_tokens, length_mask)
 
         if use_gpu:
             tgt_tokens = tgt_tokens.cuda()
@@ -199,6 +214,9 @@ class DiffusionModel(nn.Module):
             t_tensor = torch.full((length_mask.shape[0],), t)
             if use_gpu:
                 t_tensor = t_tensor.cuda()
+
+            if annealing_schedule:
+                memory = annealing_schedule(memory, t)
             
             token_output = self.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor)
             if diffuse_length:
@@ -208,7 +226,7 @@ class DiffusionModel(nn.Module):
                 add_indicator = max_tokens == add_index
                 lengths = self.get_lengths_from_padding(length_mask)
                 added_lengths = lengths + add_indicator
-                batch_idx = torch.range(0, len(length_mask))
+                batch_idx = torch.arange(0, len(length_mask))
                 token_output[added_lengths, batch_idx] = token_output[lengths, batch_idx]
                 length_mask[batch_idx, added_lengths] = False
 
@@ -251,7 +269,7 @@ class DiffusionModel(nn.Module):
             sampled_mols = [m.replace('?', '') for m in sampled_mols]
 
         if return_chain:
-            return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), chain
+            return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]).detach().cpu().numpy(), chain
 
         if return_memory:
             mem_length = self.get_lengths_from_padding(memory_pad_mask)
@@ -259,7 +277,12 @@ class DiffusionModel(nn.Module):
             return sampled_mols, memories
 
         if return_lengths:
-            return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), predicted_lengths.detach().cpu().numpy(), true_lengths.cpu().numpy()
+            batch_idx = torch.arange(0, len(length_mask), dtype=int)
+            length_idx = lengths - self.get_lengths_from_padding(batch['encoder_pad_mask'])
+            return (sampled_mols,
+                    torch.log(tgt_tokens.max(dim=-1)[0]).detach().cpu().numpy(),
+                    length_idx.detach().cpu().numpy(),
+                    predicted_lengths[batch_idx, length_idx.int() + 10].detach().cpu().numpy())
 
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])
 

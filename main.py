@@ -65,7 +65,7 @@ def parse_args():
 
     parser.add_argument("--beta_schedule", type=str, default='cosine')
     parser.add_argument("--loss_terms", type=str, default='nll')
-    parser.add_argument("--length_loss", type=str, default='weighted_sum')
+    parser.add_argument("--length_loss", type=str, default='cross_entropy')
     parser.add_argument("--pad_limit", nargs='+', type=int, default=None)
     parser.add_argument("--diffuse_length", action='store_true')
 
@@ -140,8 +140,8 @@ def main():
     if os.path.exists(f'out/metrics/{args.name}_metrics_log.txt'):
         os.remove(f'out/metrics/{args.name}_metrics_log.txt')
 
-    if not os.path.exists(f'out/samples/{args.name}/'):
-        os.mkdir(f'out/samples/{args.name}/')
+    # if not os.path.exists(f'out/samples/{args.name}/'):
+    #     os.mkdir(f'out/samples/{args.name}/')
 
     print(f'Training {args.name} with heuristics...')
     trainer.train(dataloaders, args.epochs, args.epochs, report_interval=None, batch_limit=args.batch_limit, val_limit=10,
