@@ -66,14 +66,12 @@ class DiffusionModelTrainer:
                 epoch_nb = int(file.split('_')[-1].split('.')[0])
                 if epoch_nb < best_epoch:
                     os.remove(file)
-                    os.remove(f'out/models/{self.name}_{hm.name}-HM_{epoch_nb}.pkl')
 
         files = glob.glob(f'out/models/{self.name}_.pkl')
         for file in files:
             epoch_nb = int(file.split('_')[-1].split('.')[0])
             if epoch_nb > best_epoch:
                 os.remove(file)
-                os.remove(f'out/models/{self.name}_{hm.name}-HM_{epoch_nb}.pkl')
 
         print("Optimization Finished!")
         print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
