@@ -1,0 +1,158 @@
+\setcounter{section}{5}
+
+
+\section{Supplemental Material}
+
+\subsection{Tables of Results for 1D and 2D CFD Models}
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{lrrrr}
+        \toprule
+              &  \multicolumn{4}{c}{OneStep} \\
+        \cmidrule(lr){2-5}
+        Model &  FNO (unscaled) &  FNO (scaled) &  PI-FNO (unscaled) &  PI-FNO (scaled) \\
+        \midrule
+        RMSE     &  0.353 $\pm$ 0.171 &  0.255 $\pm$ 0.138 &  0.423 $\pm$ 0.171 &  0.397 $\pm$ 0.171 \\
+        nRMSE    &  0.303 $\pm$ 0.090 &  0.236 $\pm$ 0.109 &  0.402 $\pm$ 0.143 &  0.364 $\pm$ 0.125 \\
+        MaxError &  1.184 $\pm$ 0.536 &  1.048 $\pm$ 0.528 &  1.155 $\pm$ 0.502 &  1.125 $\pm$ 0.486 \\
+        cRMSE    &  0.152 $\pm$ 0.096 &  0.059 $\pm$ 0.050 &  0.188 $\pm$ 0.107 &  0.098 $\pm$ 0.084 \\
+        bRMSE    &  0.282 $\pm$ 0.146 &  0.191 $\pm$ 0.106 &  0.348 $\pm$ 0.144 &  0.328 $\pm$ 0.150 \\
+        fRMSE    &  0.044 $\pm$ 0.021 &  0.029 $\pm$ 0.016 &  0.053 $\pm$ 0.022 &  0.047 $\pm$ 0.020 \\
+        \midrule
+              &  \multicolumn{4}{c}{AutoRegressive} \\
+        \cmidrule(lr){2-5}
+        Model &  FNO (unscaled) &  FNO (scaled) &  PI-FNO (unscaled) &  PI-FNO (scaled) \\
+        \midrule
+        RMSE     &  0.247 $\pm$ 0.153 &  \textbf{0.141} $\pm$ 0.082 &  0.443 $\pm$ 0.293 &  0.278 $\pm$ 0.145 \\
+        nRMSE    &  0.218 $\pm$ 0.111 &  \textbf{0.126} $\pm$ 0.056 &  0.404 $\pm$ 0.240 &  0.258 $\pm$ 0.101 \\
+        MaxError &  0.947 $\pm$ 0.459 &  \textbf{0.765} $\pm$ 0.394 &  1.285 $\pm$ 0.737 &  1.062 $\pm$ 0.470 \\
+        cRMSE    &  0.074 $\pm$ 0.043 &  \textbf{0.025} $\pm$ 0.023 &  0.228 $\pm$ 0.190 &  0.079 $\pm$ 0.088 \\
+        bRMSE    &  0.174 $\pm$ 0.113 &  \textbf{0.098} $\pm$ 0.057 &  0.348 $\pm$ 0.246 &  0.202 $\pm$ 0.119 \\
+        fRMSE    &  0.029 $\pm$ 0.019 &  \textbf{0.015} $\pm$ 0.009 &  0.055 $\pm$ 0.035 &  0.033 $\pm$ 0.018 \\
+        \midrule
+    \end{tabular}
+    
+    \caption{Performance metrics on the 1D CFD dataset. The metric for the strongest performing model is highlighted in \textbf{bold}. AutoRegressive models perform consistently stronger than their OneStep counterparts; amongst the AutoRegressive models, the scaled versions perform consistently stronger than their unscaled versions.}
+    \label{tab:1D_metrics}
+\end{table}
+
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{lrrrr}
+        \toprule
+              &  \multicolumn{4}{c}{OneStep} \\
+        \cmidrule(lr){2-5}
+        Model &  FNO (unscaled) &  FNO (scaled) &  PI-FNO (unscaled) &  PI-FNO (scaled) \\
+        \midrule
+        RMSE     &  0.418 $\pm$ 0.180 &  0.410 $\pm$ 0.216 &  0.460 $\pm$ 0.213 &  0.407 $\pm$ 0.165 \\
+        nRMSE    &  0.322 $\pm$ 0.080 &  0.299 $\pm$ 0.072 &  0.348 $\pm$ 0.082 &  0.304 $\pm$ 0.048 \\
+        MaxError &  2.092 $\pm$ 0.840 &  2.067 $\pm$ 0.924 &  2.205 $\pm$ 0.919 &  2.066 $\pm$ 0.861 \\
+        cRMSE    &  0.056 $\pm$ 0.026 &  0.025 $\pm$ 0.014 &  0.067 $\pm$ 0.031 &  0.028 $\pm$ 0.019 \\
+        bRMSE    &  0.399 $\pm$ 0.201 &  0.400 $\pm$ 0.239 &  0.443 $\pm$ 0.235 &  0.396 $\pm$ 0.182 \\
+        fRMSE    &  0.040 $\pm$ 0.017 &  0.035 $\pm$ 0.018 &  0.043 $\pm$ 0.020 &  0.037 $\pm$ 0.015 \\
+        \midrule
+              &  \multicolumn{4}{c}{AutoRegressive} \\
+        \cmidrule(lr){2-5}
+        RMSE     &  0.370 $\pm$ 0.149 &  \textbf{0.351} $\pm$ 0.139 &  0.388 $\pm$ 0.153 &  0.382 $\pm$ 0.146 \\
+        nRMSE    &  0.283 $\pm$ 0.060 &  \textbf{0.263} $\pm$ 0.047 &  0.297 $\pm$ 0.059 &  0.288 $\pm$ 0.046 \\
+        MaxError &  1.942 $\pm$ 0.798 &  \textbf{1.884} $\pm$ 0.770 &  2.012 $\pm$ 0.833 &  1.983 $\pm$ 0.799 \\
+        cRMSE    &  0.025 $\pm$ 0.015 &  0.023 $\pm$ 0.015 &  0.044 $\pm$ 0.018 &  \textbf{0.021} $\pm$ 0.011 \\
+        bRMSE    &  0.356 $\pm$ 0.161 &  \textbf{0.338} $\pm$ 0.152 &  0.372 $\pm$ 0.162 &  0.367 $\pm$ 0.158 \\
+        fRMSE    &  0.032 $\pm$ 0.013 &  \textbf{0.030} $\pm$ 0.012 &  0.035 $\pm$ 0.014 &  0.034 $\pm$ 0.013 \\
+        \midrule
+    \end{tabular}
+    
+    \caption{Performance metrics on the 2D CFD dataset. The metric for the strongest performing model is highlighted in \textbf{bold}. AutoRegressive models perform consistently stronger than their OneStep counterparts; amongst the AutoRegressive models, the scaled versions perform consistently stronger than their unscaled versions.}
+    \label{tab:2D_metrics}
+
+\end{table}
+
+\newpage
+\subsection{Auto-Regressive Loss Plots for 1D and 2D CFD Models}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{../NeurIPS_2023/visuals/1D_combined_vs_velocity.png}
+    \caption{MSE loss for all channels (left) and MSE loss for velocity channels (right) for the 1D CFD dataset for auto-regressive predictions on the test dataset. Auto-regressive models which include density and pressure output scaling have consistently lower error throughout the predicted time-frame, including on the unscaled velocity channels, which are not directly affected by the scaling procedure.}
+    \label{fig:combo_vs_vel1}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{../NeurIPS_2023/visuals/2D_combined_vs_velocity.png}
+    \caption{MSE loss for all channels (left) and MSE loss for velocity channels (right) for the 2D CFD dataset for auto-regressive predictions on the test dataset. Auto-regressive models which include density and pressure output scaling have consistently lower error throughout the predicted time-frame, including on the unscaled velocity channels, which are not directly affected by the scaling procedure.}
+    \label{fig:combo_vs_vel2}
+\end{figure}
+
+\newpage
+\subsection{Visuals of 1D CFD AutoRegressive Model Predictions}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.64\textwidth]{NeurIPS_2023/visuals/1D_Density.png}
+    \caption{Visualizations of the ground truth, scaled, and unscaled predictions for auto-regressive models without PDE loss on the 1D CFD density channel.}
+    \label{fig:1d_rho}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.64\textwidth]{NeurIPS_2023/visuals/1D_Density_error.png}
+    \caption{Visualizations of errors for the scaled and unscaled predictions of auto-regressive models without PDE loss on the 1D CFD density channel. As time progresses, the unscaled model begins to consistently overpredict, while error for the scaled model remains centered around 0.}
+    \label{fig:1d_rho_error}
+\end{figure}
+
+\newpage
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.64\textwidth]{NeurIPS_2023/visuals/1D_Velocity.png}
+    \caption{Visualizations of the ground truth, scaled, and unscaled predictions for auto-regressive models without PDE loss on the 1D CFD velocity channel.}
+    \label{fig:1d_vel}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.64\textwidth]{NeurIPS_2023/visuals/1D_Velocity_error.png}
+    \caption{Visualizations of errors for the scaled and unscaled predictions of auto-regressive models without PDE loss on the 1D CFD velocity channel. As time progresses, the unscaled model begins to consistently overpredict, while error for the scaled model remains centered around 0.}
+    \label{fig:1d_vel_error}
+\end{figure}
+
+\newpage
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.64\textwidth]{NeurIPS_2023/visuals/1D_Pressure.png}
+    \caption{Visualizations of the ground truth, scaled, and unscaled predictions for auto-regressive models without PDE loss on the 1D CFD pressure channel.}
+    \label{fig:1d_p}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.64\textwidth]{NeurIPS_2023/visuals/1D_Pressure_error.png}
+    \caption{Visualizations of errors for the scaled and unscaled predictions of auto-regressive models without PDE loss on the 1D CFD pressure channel. As time progresses, the unscaled model begins to consistently overpredict, while error for the scaled model remains centered around 0.}
+    \label{fig:1d_p_error}
+\end{figure}
+
+\newpage
+\subsection{Visuals of 2D CFD Model Predictions}
+
+\subsubsection{OneStep Models}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{NeurIPS_2023/visuals/2D_flow_progression_all_OneStep.png}
+    \caption{Time progression of the flow density on the 2D CFD dataset for the various one-step FNO implementations. The scaled models are able to retain more of the flow shape than unscaled models.}
+    \label{fig:2d_time_os}
+\end{figure}
+
+\newpage
+\subsubsection{AutoRegressive Models}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\textwidth]{NeurIPS_2023/visuals/2D_flow_progression_all_AutoRegressive.png}
+    \caption{Time progression of the flow density on the 2D CFD dataset for the various auto-regressive FNO implementations. The scaled models are able to retain more of the flow shape than unscaled models.}
+    \label{fig:2d_time_ar}
+\end{figure}
