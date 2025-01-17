@@ -1,3 +1,9 @@
+# Don't add all generated output files to the repository
+out/
+visuals/
+*.tmp
+.vscode/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
