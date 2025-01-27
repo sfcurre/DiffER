@@ -3,6 +3,10 @@ import torch
 import random
 from pathlib import Path
 
+'''
+This code is copied from Chemformer: https://github.com/MolecularAI/Chemformer
+'''
+
 
 DEFAULT_BEGIN_TOKEN = "^"
 DEFAULT_END_TOKEN = "&"

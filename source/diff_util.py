@@ -3,6 +3,10 @@ import torch.nn.functional as F
 import numpy as np
 import math
 
+'''
+this code is heavily taken from https://github.com/ehoogeboom/multinomial_diffusion/tree/main
+'''
+
 def extract(a, t, x_shape):
     b, *_ = t.shape
     out = a.gather(-1, t)
@@ -135,33 +139,14 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
     return np.array(betas)
 
-def cosine_beta_schedule(timesteps, s = 0.008):
-    """
-    cosine schedule
-    as proposed in https://openreview.net/forum?id=-NEXDKk8gZ
-    """
-    steps = timesteps + 1
-    x = np.linspace(0, steps, steps)
-    alphas_cumprod = np.cos(((x / steps) + s) / (1 + s) * np.pi * 0.5) ** 2
-    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
-    alphas = (alphas_cumprod[1:] / alphas_cumprod[:-1])
-
-    alphas = np.clip(alphas, a_min=0.001, a_max=1.)
-
-    # Use sqrt of this, so the alpha in our paper is the alpha_sqrt from the
-    # Gaussian diffusion in Ho et al.
-    alphas = np.sqrt(alphas)
-    return alphas
-
 class SinusoidalPosEmb(torch.nn.Module):
-    def __init__(self, dim, num_steps, rescale_steps=4000):
+    def __init__(self, dim, rescale_steps=4000):
         super().__init__()
         self.dim = dim
-        self.num_steps = float(num_steps)
         self.rescale_steps = float(rescale_steps)
 
     def forward(self, x):
-        x = x / self.num_steps * self.rescale_steps
+        x = x * self.rescale_steps
         device = x.device
         half_dim = self.dim // 2
         emb = math.log(10000) / (half_dim - 1)
@@ -170,196 +155,3 @@ class SinusoidalPosEmb(torch.nn.Module):
         emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
         return emb
 
-class DiffusionCollater:
-    def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, beta_schedule='cosine', pad_limit=20, diffuse_length=False):
-        self.tokeniser = tokeniser
-        self.num_timesteps = num_timesteps
-        self.forward_pred = forward_pred
-        self.max_seq_len = max_seq_len
-        self.pad_limit = pad_limit
-        self.diffuse_length = diffuse_length
-        
-        # alphas = cosine_beta_schedule(num_timesteps)
-        alphas = 1 - get_named_beta_schedule(beta_schedule, num_diffusion_timesteps=num_timesteps)
-
-        alphas = torch.tensor(alphas.astype('float64'))
-        log_alpha = np.log(alphas)
-        log_cumprod_alpha = np.cumsum(log_alpha)
-
-        log_1_min_alpha = log_1_min_a(log_alpha)
-        log_1_min_cumprod_alpha = log_1_min_a(log_cumprod_alpha)
-
-        assert log_add_exp(log_alpha, log_1_min_alpha).abs().sum().item() < 1.e-5
-        assert log_add_exp(log_cumprod_alpha, log_1_min_cumprod_alpha).abs().sum().item() < 1e-5
-        assert (np.cumsum(log_alpha) - log_cumprod_alpha).abs().sum().item() < 1.e-5
-
-        # Convert to float32 and register buffers.
-        self.log_alpha = log_alpha.float()
-        self.log_1_min_alpha = log_1_min_alpha.float()
-        self.log_cumprod_alpha = log_cumprod_alpha.float()
-        self.log_1_min_cumprod_alpha = log_1_min_cumprod_alpha.float()
-
-        self.Lt_history = torch.zeros(num_timesteps)
-        self.Lt_count = torch.zeros(num_timesteps)
-
-    def __call__(self, batch):
-        return self._collate(batch)
-
-    def _collate(self, batch):
-        reacts_smiles, prods_smiles = tuple(zip(*batch))
-
-        if self.forward_pred:
-            encoder_smiles = reacts_smiles
-            decoder_smiles = prods_smiles
-        else:
-            encoder_smiles = prods_smiles
-            decoder_smiles = reacts_smiles
-
-        # add some number of length-padding tokens
-        lpad_token = '?' #self.tokeniser.unk_token #end_token
-        
-        if self.pad_limit is None:
-            decoder_smiles_padded = decoder_smiles
-
-        elif isinstance(self.pad_limit, int):
-            if self.pad_limit > 0: 
-                decoder_smiles_padded = tuple(smi + lpad_token * np.random.randint(1, self.pad_limit) for smi in decoder_smiles)
-            elif self.pad_limit == 0:
-                decoder_smiles_padded = decoder_smiles
-            elif self.pad_limit == -1:
-                decoder_smiles_padded = tuple(smi + lpad_token * self.max_seq_len for smi in decoder_smiles)
-
-        elif isinstance(self.pad_limit, list):
-            encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=False)['original_tokens']
-            decoder_input = self.tokeniser.tokenise(decoder_smiles, mask=False, pad=False)['original_tokens']
-        
-            _, max_increase = min(self.pad_limit), max(self.pad_limit)
-            decoder_smiles_padded = []
-            for encoder_tokens, decoder_tokens in zip(encoder_input, decoder_input):
-                increase = len(decoder_tokens) - len(encoder_tokens)
-                decoder_tokens = decoder_tokens[1:-1] # remove the start and end token
-                if increase < max_increase:
-                    decoder_tokens.extend([lpad_token] * (max_increase - increase))
-                elif increase > max_increase:
-                    decoder_tokens = decoder_tokens[:max_increase - increase]
-                decoder_smiles_padded.append(''.join(decoder_tokens))
-
-        t = None
-        if self.diffuse_length:
-            encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=False)['original_tokens']
-            decoder_input = self.tokeniser.tokenise(decoder_smiles, mask=False, pad=False)['original_tokens']
-            t, _ = self.sample_time(size=len(encoder_smiles), method='importance')
-            decoder_smiles_padded = self.diffuse_lengths(encoder_input, decoder_input, t)
-
-        encoder_input = self.tokeniser.tokenise(encoder_smiles, mask=False, pad=True)
-        decoder_input = self.tokeniser.tokenise(decoder_smiles_padded, mask=False, pad=True)
-        
-        encoder_token_ids, encoder_pad_mask = self._partial_collate(encoder_input)
-        # m_encoder_token_ids, m_encoder_pad_mask, m_encoder_t = self._partial_collate(encoder_input, noised=True)
-        decoder_token_ids, decoder_pad_mask = self._partial_collate(decoder_input)
-        m_decoder_token_ids, m_decoder_pad_mask, m_decoder_t = self._partial_collate(decoder_input, noised=True, t=t)
-        
-        pad_index = self.tokeniser.vocab[lpad_token]
-        collate_output = {
-            "encoder_input": encoder_token_ids,
-            "encoder_pad_mask": encoder_pad_mask,
-            "decoder_input": m_decoder_token_ids,
-            "decoder_pad_mask": m_decoder_pad_mask,
-            "target": decoder_token_ids.max(dim=-1)[1],
-            "target_onehots": decoder_token_ids,
-            "target_mask": decoder_pad_mask,
-            "target_smiles": decoder_smiles,
-            "target_padding": (decoder_token_ids == pad_index).sum(dim=0),
-            # "masked_encoder_input": m_encoder_token_ids,
-            # "masked_encoder_pad_mask": m_encoder_pad_mask,
-            "encoder_smiles": encoder_smiles,
-            "decoder_t": m_decoder_t,
-            "device": "cpu"
-        }
-        
-        return collate_output
-
-    def _partial_collate(self, inputs, noised=False, t=None):
-        input_tokens = inputs["original_tokens"]
-        input_mask = inputs["original_pad_masks"]
-        
-        input_token_ids = self.tokeniser.convert_tokens_to_ids(input_tokens)
-        
-        input_token_ids = torch.tensor(input_token_ids)
-        input_token_ids = index_to_log_onehot(input_token_ids, len(self.tokeniser))
-        input_pad_mask = torch.tensor(input_mask, dtype=torch.bool).transpose(0, 1)
-
-        input_token_ids = input_token_ids[..., :self.max_seq_len]
-        input_pad_mask = input_pad_mask[:self.max_seq_len]
-
-        if noised:
-            #importance sample t
-            if t is None:
-                t, _ = self.sample_time(size=len(input_tokens), method='importance')
-            input_token_ids = self.q_sample(input_token_ids, t)
-            return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
-        
-        return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask
-
-    def q_sample(self, log_x_start, t):
-        log_EV_qxt_x0 = self.q_pred(log_x_start, t)
-        log_sample = log_sample_categorical(log_EV_qxt_x0, len(self.tokeniser))
-        return log_sample
-
-    def q_pred(self, log_x_start, t):
-        log_cumprod_alpha_t = extract(self.log_cumprod_alpha, t, log_x_start.shape)
-        log_1_min_cumprod_alpha = extract(self.log_1_min_cumprod_alpha, t, log_x_start.shape)
-
-        log_probs = log_add_exp(
-            log_x_start + log_cumprod_alpha_t,
-            log_1_min_cumprod_alpha - np.log(len(self.tokeniser))
-        )
-
-        return log_probs
-    
-    def diffuse_lengths(self, encoder_input, decoder_input, t):
-        decoder_input_cutoff = []
-        t = t.numpy()
-        print(t)
-        for i, (source, target) in enumerate(zip(encoder_input, decoder_input)):
-            length_increase = len(encoder_input) - len(decoder_input)
-            target_increase = length_increase * min(2 * t[i] / self.num_timesteps, 1)
-            print(target_increase)
-            if target_increase < length_increase and np.random.rand() < target_increase % 1:
-                target = target[1:-1][:int(len(encoder_input) + target_increase + 1)]
-            else:
-                target = target[1:-1][:int(len(encoder_input) + target_increase)]
-                target.append('<ADD>')
-            decoder_input_cutoff.append(''.join(target))
-        return decoder_input_cutoff
-
-    def sample_time(self, size, method='uniform'):
-        if method == 'importance':
-            if not (self.Lt_count > 10).all():
-                return self.sample_time(size, method='uniform')
-
-            Lt_sqrt = torch.sqrt(self.Lt_history + 1e-10) + 0.0001
-            Lt_sqrt[0] = Lt_sqrt[1]  # Overwrite decoder term with L1.
-            pt_all = Lt_sqrt / Lt_sqrt.sum()
-
-            t = torch.multinomial(pt_all, num_samples=size, replacement=True)
-
-            pt = pt_all.gather(dim=0, index=t)
-
-            return t, pt
-
-        elif method == 'uniform':
-            t = torch.randint(0, self.num_timesteps, (size,)).long()
-
-            pt = torch.ones_like(t).float() / self.num_timesteps
-            return t, pt
-        else:
-            raise ValueError
-        
-    def update_Lt(self, t, kl):
-        Lt2 = kl.pow(2).cpu()
-        t = t.cpu()
-        Lt2_prev = self.Lt_history.gather(dim=0, index=t)
-        new_Lt_history = (0.1 * Lt2 + 0.9 * Lt2_prev).detach()
-        self.Lt_history.scatter_(dim=0, index=t, src=new_Lt_history)
-        self.Lt_count.scatter_add_(dim=0, index=t, src=torch.ones_like(Lt2))

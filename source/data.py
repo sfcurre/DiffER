@@ -1,17 +1,10 @@
 from pathlib import Path
 import numpy as np
-import math
-
-import selfies as sf
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from pysmilesutils.augment import SMILESAugmenter
 
 class RSmilesUspto50(torch.utils.data.Dataset):
-    def __init__(self, data_path, split='train', aug_prob=0.0, forward=True, use_canonical=False, use_selfies=False):
+    def __init__(self, data_path, split='train', forward=True, use_canonical=False):
         self.path = Path(data_path)
         reactants, products = self.read_data_dir(self.path, split)
 
@@ -22,9 +15,6 @@ class RSmilesUspto50(torch.utils.data.Dataset):
         self.products = products
         self.forward = forward
         self.use_canonical = use_canonical
-        self.use_selfies = use_selfies
-        self.aug_prob = aug_prob
-        self.aug = SMILESAugmenter()
 
     def __len__(self):
         return len(self.reactants)
@@ -38,14 +28,7 @@ class RSmilesUspto50(torch.utils.data.Dataset):
 
     def transform(self, react, prod, type_token=None):
         react_str, prod_str = react.replace(' ', ''), prod.replace(' ', '')
-        if np.random.rand() < self.aug_prob:
-            react_str = self.aug(react_str)[0]
-            prod_str = self.aug(prod_str)[0]
-
-        if self.use_selfies:
-            react_str = sf.encoder(react_str)
-            prod_str = sf.encoder(prod_str)
-
+        
         if self.forward:
             react_str = f"{str(type_token)}{react_str}" if type_token else react_str
         else:
