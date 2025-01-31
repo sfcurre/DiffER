@@ -15,6 +15,7 @@ and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/t
 
 class DiscreteDiffuser(nn.Module):
     def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, beta_schedule='cosine', pad_limit=20):
+        super(DiscreteDiffuser, self).__init__()
         self.tokeniser = tokeniser
         self.num_timesteps = num_timesteps
         self.forward_pred = forward_pred
@@ -35,7 +36,6 @@ class DiscreteDiffuser(nn.Module):
         assert log_add_exp(log_cumprod_alpha, log_1_min_cumprod_alpha).abs().sum().item() < 1e-5
         assert (np.cumsum(log_alpha) - log_cumprod_alpha).abs().sum().item() < 1.e-5
 
-        # Convert to float32 and register buffers.
         self.log_alpha = log_alpha.float()
         self.log_1_min_alpha = log_1_min_alpha.float()
         self.log_cumprod_alpha = log_cumprod_alpha.float()
@@ -94,7 +94,6 @@ class DiscreteDiffuser(nn.Module):
             # "masked_encoder_pad_mask": m_encoder_pad_mask,
             "encoder_smiles": encoder_smiles,
             "decoder_t": m_decoder_t,
-            "device": "cpu"
         }
         
         return collate_output
@@ -127,8 +126,8 @@ class DiscreteDiffuser(nn.Module):
         return log_sample
 
     def q_pred(self, log_x_start, t):
-        log_cumprod_alpha_t = extract(self.log_cumprod_alpha, t, log_x_start.shape)
-        log_1_min_cumprod_alpha = extract(self.log_1_min_cumprod_alpha, t, log_x_start.shape)
+        log_cumprod_alpha_t = extract(self.log_cumprod_alpha.to(t.device), t, log_x_start.shape)
+        log_1_min_cumprod_alpha = extract(self.log_1_min_cumprod_alpha.to(t.device), t, log_x_start.shape)
 
         log_probs = log_add_exp(
             log_x_start + log_cumprod_alpha_t,
@@ -138,8 +137,8 @@ class DiscreteDiffuser(nn.Module):
         return log_probs
     
     def q_pred_one_timestep(self, log_x_t, t):
-        log_alpha_t = extract(self.log_alpha, t, log_x_t.shape)
-        log_1_min_alpha_t = extract(self.log_1_min_alpha, t, log_x_t.shape)
+        log_alpha_t = extract(self.log_alpha.to(t.device), t, log_x_t.shape)
+        log_1_min_alpha_t = extract(self.log_1_min_alpha.to(t.device), t, log_x_t.shape)
 
         # alpha_t * E[xt] + (1 - alpha_t) 1 / K
         log_probs = log_add_exp(
@@ -155,11 +154,11 @@ class DiscreteDiffuser(nn.Module):
 
         t_minus_1 = t - 1
         # Remove negative values, will not be used anyway for final decoder
-        t_minus_1 = torch.where(t_minus_1 < 0, torch.zeros_like(t_minus_1), t_minus_1)
+        t_minus_1 = torch.where(t_minus_1 < 0, torch.zeros_like(t_minus_1, device=t_minus_1.device), t_minus_1)
         log_EV_qxtmin_x0 = self.q_pred(log_x_start, t_minus_1)
 
         num_axes = (1,) * (len(log_x_start.size()) - 1)
-        t_broadcast = t.view(-1, *num_axes) * torch.ones_like(log_x_start)
+        t_broadcast = t.view(-1, *num_axes) * torch.ones_like(log_x_start, device=log_x_start.device)
         log_EV_qxtmin_x0 = torch.where(t_broadcast == 0, log_x_start, log_EV_qxtmin_x0)
 
 
@@ -197,8 +196,8 @@ class DiscreteDiffuser(nn.Module):
             raise ValueError
         
     def update_Lt(self, t, kl):
-        Lt2 = kl.pow(2).cpu()
         t = t.cpu()
+        Lt2 = kl.pow(2).cpu()
         Lt2_prev = self.Lt_history.gather(dim=0, index=t)
         new_Lt_history = (0.1 * Lt2 + 0.9 * Lt2_prev).detach()
         self.Lt_history.scatter_(dim=0, index=t, src=new_Lt_history)
@@ -210,27 +209,27 @@ class DiscreteDiffuser(nn.Module):
 
     def get_length_mask(self, lengths):
         max_len = lengths.max().item()
-        length_mask = torch.triu(torch.ones(max_len, max_len, dtype=torch.bool), 1)
+        length_mask = torch.triu(torch.ones(max_len, max_len, dtype=torch.bool, device=lengths.device), 1)
         length_mask = torch.stack([length_mask[lengths[batch] - 1] for batch in range(len(lengths))], dim=0)
         return length_mask.squeeze()
 
     def init_noise(self, target_lengths):
         length_mask = self.get_length_mask(target_lengths)
-        uniform_logits = torch.zeros((length_mask.shape[0], len(self.tokeniser), length_mask.shape[1]))
+        uniform_logits = torch.zeros((length_mask.shape[0], len(self.tokeniser), length_mask.shape[1]), device=length_mask.device)
         tgt_tokens = log_sample_categorical(uniform_logits, len(self.tokeniser)).permute(2, 0, 1)
         
-        pad_token =  index_to_log_onehot(torch.tensor([[self.pad_token_idx]]), len(self.tokeniser)).permute(2, 0, 1)
+        pad_token =  index_to_log_onehot(torch.tensor([[self.pad_token_idx]], device=length_mask.device), len(self.tokeniser)).permute(2, 0, 1)
         tgt_tokens = (~length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, model, verbose=True, use_gpu=True, pred_lengths=True, clean=True):
+    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = model.encode(encoder_input, encoder_pad_mask)
             
         true_lengths = self.get_lengths_from_padding(batch['target_mask'])
         if pred_lengths:
-            if self.collate_fn.pad_limit == -1:
+            if self.pad_limit == -1:
                 lengths[:] = self.max_seq_len
             else:
                 # lengths = torch.multinomial(torch.exp(predicted_lengths), num_samples=1).squeeze()
@@ -241,11 +240,7 @@ class DiscreteDiffuser(nn.Module):
         else:
             lengths = true_lengths
 
-        tgt_tokens, length_mask = self.init_noise(lengths.cpu())
-        
-        if use_gpu:
-            tgt_tokens = tgt_tokens.cuda()
-            length_mask = length_mask.cuda()
+        tgt_tokens, length_mask = self.init_noise(lengths)
     
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')
@@ -253,10 +248,7 @@ class DiscreteDiffuser(nn.Module):
         for t in reversed(range(1, self.num_timesteps)):
             # My code likes (time, batch, tokens)
             # MultiDiffusion code likes (batch, tokens, time)
-            t_tensor = torch.full((length_mask.shape[0],), t)
-            if use_gpu:
-                t_tensor = t_tensor.cuda()
-
+            t_tensor = torch.full((length_mask.shape[0],), t, device=tgt_tokens.device)
             token_output = model.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor)
 
             log_token_output = torch.log_softmax(token_output, dim=-1).permute((1, 2, 0))

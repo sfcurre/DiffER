@@ -113,7 +113,8 @@ class DiffusionModel(nn.Module):
     def encode(self, encoder_input, encoder_pad_mask):
         encoder_embs = self.embed_log_onehot(encoder_input)
         
-        len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32).cuda())
+        len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32, device=encoder_embs.device))
+        # len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32).to(encoder_embs.get_device()))
         # len_tokens = self.embed_lengths(encoder_pad_mask.sum(-1).unsqueeze(-1)) # input to embedding is source length
         encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
@@ -130,7 +131,7 @@ class DiffusionModel(nn.Module):
         decoder_embs = self.embed_log_onehot(decoder_input, t)
 
         seq_len, _, _ = tuple(decoder_embs.size())
-        tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool).cuda()
+        tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool, device=decoder_embs.device)
 
         model_output = self.decoder(decoder_embs, memory,
             tgt_key_padding_mask=decoder_pad_mask,

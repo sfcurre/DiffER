@@ -103,11 +103,11 @@ def main(name, config, load, num_samples, test, pred_lengths):
         
         trainer.move_batch_to_gpu(batch)
         for _ in range(num_samples):
-            sampled_mols, lprobs = model.sample(batch,
-                                                verbose=False,
-                                                use_gpu=True, 
-                                                pred_lengths=pred_lengths,
-                                                clean=False)
+            sampled_mols, lprobs = diffuser.sample(batch,
+                                                   model,
+                                                   verbose=False,
+                                                   pred_lengths=pred_lengths,
+                                                   clean=False)
             for j, smi in enumerate(sampled_mols):
                 targets[batch['encoder_smiles'][j]]['samples'].append(smi)
                 

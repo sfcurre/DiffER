@@ -34,13 +34,15 @@ class DiffusionModelTrainer:
         best_epoch = 0
         for epoch in range(epochs):
             print(f'Epoch {epoch} - {time.time() - t_total}')
+            epoch_losses = []
             for i, batch in enumerate(dataloaders['train']):
-                loss_values.append(self.train_step(batch))
+                epoch_losses.append(self.train_step(batch))
                     
             with torch.no_grad():
                 self.print_metrics(dataloaders['val'], str(epoch) + f'.{i+1} - {time.time() - t_total}',
                                    val_limit, pred_lengths=pred_lengths)
             torch.save(self.model.state_dict(), 'out/models/{}_{}.pkl'.format(self.name, epoch))
+            loss_values.append(np.mean(epoch_losses))
             np.save(f'out/losses/{self.name}_losses.npy', np.array(loss_values))
 
             if loss_values[-1] < best:
@@ -59,11 +61,11 @@ class DiffusionModelTrainer:
                 if epoch_nb < best_epoch:
                     os.remove(file)
 
-        files = glob.glob(f'out/models/{self.name}_.pkl')
-        for file in files:
-            epoch_nb = int(file.split('_')[-1].split('.')[0])
-            if epoch_nb > best_epoch:
-                os.remove(file)
+        # files = glob.glob(f'out/models/{self.name}_*.pkl')
+        # for file in files:
+        #     epoch_nb = int(file.split('_')[-1].split('.')[0])
+        #     if epoch_nb > best_epoch:
+        #         os.remove(file)
 
         print("Optimization Finished!")
         print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
@@ -133,8 +135,7 @@ class DiffusionModelTrainer:
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
-        sampled_smiles, lprobs = self.diffuser.sample(batch, self.model, verbose=True,
-                                                      use_gpu=self.use_gpu, pred_lengths=pred_lengths)
+        sampled_smiles, lprobs = self.diffuser.sample(batch, self.model, verbose=True, pred_lengths=pred_lengths)
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),
@@ -194,7 +195,7 @@ class DiffusionModelTrainer:
         length_target = length_target - input_length
         if self.length_loss == 'cross_entropy':
             # leverage the fact that the change in length is likely to be small, so large indices can be used for negative length change
-            length_loss = -pred_lengths.gather(dim=-1, index=length_target % self.max_length)
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target % self.diffuser.max_seq_len)
         elif self.length_loss == 'weighted_sum':
             length_dist = torch.exp(pred_lengths)
             length_indices = torch.arange(0, length_dist.shape[-1], device='cuda').repeat(len(length_target), 1)

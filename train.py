@@ -15,6 +15,8 @@ USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
 if use_gpu:
     print("Using CUDA.")
+else:
+    print("Using CPU.")
     
 #========================================================================
 def main(name, config, load):
