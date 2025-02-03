@@ -138,20 +138,3 @@ def betas_for_alpha_bar(num_diffusion_timesteps, alpha_bar, max_beta=0.999):
         t2 = (i + 1) / num_diffusion_timesteps
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
     return np.array(betas)
-
-class SinusoidalPosEmb(torch.nn.Module):
-    def __init__(self, dim, rescale_steps=4000):
-        super().__init__()
-        self.dim = dim
-        self.rescale_steps = float(rescale_steps)
-
-    def forward(self, x):
-        x = x * self.rescale_steps
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x[:, None] * emb[None, :]
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
-

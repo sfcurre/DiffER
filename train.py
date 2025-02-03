@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from source.data import RSmilesUspto50
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.discrete_diffuser import DiscreteDiffuser
-from source.diff_model import DiffusionModel
+from source.conditional_model import ConditionalModel
 from source.diffuseq_model import DiffuseqModel
 from source.trainer import DiffusionModelTrainer
 
@@ -52,7 +52,7 @@ def main(name, config, load):
                                         collate_fn=diffuser)
     print("Finished datasets.")
 
-    model_class = DiffusionModel
+    model_class = ConditionalModel
     if config['model']['diffuseq']:
         model_class = DiffuseqModel
     

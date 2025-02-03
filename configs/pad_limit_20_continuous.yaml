@@ -1,0 +1,30 @@
+data:
+  data_path: 'data/USPTO_50K_PtoR_aug20'
+  task: 'backward_prediction'
+
+model:
+  # architecture parameters
+  d_model: 512
+  num_layers: 6
+  num_heads: 8
+  d_feedforward: 2048
+  activation: 'gelu'
+  max_seq_len: 256
+  dropout: 0.1
+
+  #diffusion parameters
+  num_timesteps: 200
+  beta_schedule: 'cosine'
+  loss_terms: ['mse','vb']
+  length_loss: 'cross_entropy'
+  pad_limit: 20
+  diffuseq: false
+  
+training:
+  batch_size: 64
+  learning_rate: 0.0001
+  weight_decay: 0.0
+  epochs: 30
+  patience: 30
+  gpus: 1  
+  

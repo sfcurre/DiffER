@@ -1,0 +1,11 @@
+Priority:
+    1. Separate diffusion calculations from model and sampling loop [DONE, CHECK]
+    2. Transition to config-file based system (command line is getting messy) [DONE, CHECK]
+    3. Implement continuous-time diffusion model
+
+Secondary:
+    2. Remove unused parameters from code (leftovers from previous tests, etc.)
+
+Paper-related TODOs:
+    1. ask about funding info
+    *Srini on NSF (Maybe Ziqi as well), Daniel on NIH

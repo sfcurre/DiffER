@@ -183,7 +183,11 @@ class DiffusionModelTrainer:
             mask = (t == torch.zeros_like(t)).float()
             vb_loss = mask * nll_loss + (1. - mask) * kl
             loss_terms['vb'] = vb_loss.mean()
-            
+
+        if 'elbo' in self.loss:
+            elbo = self.diffuser.calc_elbo(t, token_output, batch_input['decoder_input'], x_start)
+            loss_terms['elbo'] = elbo.mean()
+
         loss_terms['loss'] = sum(loss_terms[term] for term in loss_terms)
 
         return loss_terms
@@ -203,7 +207,7 @@ class DiffusionModelTrainer:
             length_loss = (length_dist * index_errors).sum(1)
         elif self.length_loss == 'focal':
             gamma = 0.25
-            length_loss = -pred_lengths.gather(dim=-1, index=length_target + 10)
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target % self.diffuser.max_seq_len)
             length_dist = torch.exp(-length_loss)
             focal_mod = (1 - length_dist) ** gamma
             length_loss *= focal_mod

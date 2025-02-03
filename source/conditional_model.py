@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .diff_util import SinusoidalPosEmb
 from rdkit import Chem, RDLogger
 
 '''
@@ -13,7 +12,7 @@ This code is heavily inspired by Chemformer (https://github.com/MolecularAI/Chem
 and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/tree/main)
 '''
 
-class DiffusionModel(nn.Module):
+class ConditionalModel(nn.Module):
     def __init__(self,
         tokeniser,
         max_seq_len,
@@ -24,7 +23,7 @@ class DiffusionModel(nn.Module):
         activation,
         dropout=0.1,
         ):
-        super(DiffusionModel, self).__init__()
+        super(ConditionalModel, self).__init__()
 
         self.tokeniser = tokeniser
         self.max_seq_len = max_seq_len
@@ -141,4 +140,18 @@ class DiffusionModel(nn.Module):
         token_output = self.token_fc(model_output)
         return token_output
 
-    
+class SinusoidalPosEmb(torch.nn.Module):
+    def __init__(self, dim, rescale_steps=4000):
+        super().__init__()
+        self.dim = dim
+        self.rescale_steps = float(rescale_steps)
+
+    def forward(self, x):
+        x = x * self.rescale_steps
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x[:, None] * emb[None, :]
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
