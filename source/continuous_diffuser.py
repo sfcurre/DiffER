@@ -15,15 +15,14 @@ and adapted from continuous discrete diffusion (https://github.com/andrew-cr/tau
 '''
 
 class ContinuousDiffuser(nn.Module):
-    def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, rate_model=UniformRate, min_time=0.01, eps_ratio=1, pad_limit=20):
+    def __init__(self, tokeniser, forward_pred, num_timesteps, max_seq_len, rate_model=UniformRate, min_time=0.01, pad_limit=20):
         super(ContinuousDiffuser, self).__init__()
         self.tokeniser = tokeniser
-        self.num_timesteps = num_timesteps
         self.forward_pred = forward_pred
+        self.num_timesteps = num_timesteps
         self.max_seq_len = max_seq_len
         self.rate_model = rate_model
         self.min_time = min_time
-        self.eps_ratio = eps_ratio
         self.pad_limit = pad_limit
         self.pad_token_idx  = self.tokeniser.vocab[self.tokeniser.pad_token]
 
@@ -100,7 +99,7 @@ class ContinuousDiffuser(nn.Module):
         if noised:
             #importance sample t
             if t is None:
-                t, _ = self.sample_time(size=len(input_tokens), method='importance')
+                t = self.sample_time(size=len(input_tokens))
             input_token_ids = self.q_sample(input_token_ids, t)
             return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
         
@@ -158,29 +157,8 @@ class ContinuousDiffuser(nn.Module):
         # x_tilde (B, D)
         return x_tilde.view(B, S, T)
         
-    def sample_time(self, size, method='uniform'):
-        if method == 'importance':
-            if not (self.Lt_count > 10).all():
-                return self.sample_time(size, method='uniform')
-
-            Lt_sqrt = torch.sqrt(self.Lt_history + 1e-10) + 0.0001
-            Lt_sqrt[0] = Lt_sqrt[1]  # Overwrite decoder term with L1.
-            pt_all = Lt_sqrt / Lt_sqrt.sum()
-
-            t = torch.multinomial(pt_all, num_samples=size, replacement=True)
-
-            pt = pt_all.gather(dim=0, index=t)
-
-            t = t.float() / self.num_timesteps
-            return t, pt
-
-        elif method == 'uniform':
-            t = torch.randint(0, self.num_timesteps, (size,)).long() / self.num_timesteps
-
-            pt = torch.ones_like(t).float() / self.num_timesteps
-            return t, pt
-        else:
-            raise ValueError
+    def sample_time(self, size):
+        return torch.rand((size,)) * (1.0 - self.min_time) + self.min_time
         
     def update_Lt(self, t, kl):
         t = t.cpu()
@@ -253,7 +231,7 @@ class ContinuousDiffuser(nn.Module):
                 torch.arange(B, device=device).repeat_interleave(D*S),
                 torch.arange(S, device=device).repeat(B*D),
                 tgt_tokens.long().flatten().repeat_interleave(S)
-            ].view(B,D,S) + self.eps_ratio
+            ].view(B,D,S) + 1e-9
 
             # First S is x0 second S is x tilde
 

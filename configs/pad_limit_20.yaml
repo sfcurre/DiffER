@@ -13,6 +13,7 @@ model:
   dropout: 0.1
 
   #diffusion parameters
+  continuous: True
   num_timesteps: 200
   beta_schedule: 'cosine'
   loss_terms: ['mse','vb']

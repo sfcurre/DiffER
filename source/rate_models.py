@@ -9,8 +9,8 @@ This code is copied and adapted from https://github.com/andrew-cr/tauLDR/blob/ma
 
 class BirthDeathForwardBase():
     def __init__(self, cfg, device):
-        self.S = S = cfg.data.S
-        self.sigma_min, self.sigma_max = cfg.model.sigma_min, cfg.model.sigma_max
+        self.S = S = cfg['model']['S']
+        self.sigma_min, self.sigma_max = cfg['model']['sigma_min'], cfg['model']['sigma_max']
         self.device = device
 
         base_rate = np.diag(np.ones((S-1,)), 1)
@@ -65,8 +65,8 @@ class BirthDeathForwardBase():
 
 class UniformRate():
     def __init__(self, cfg, device):
-        self.S = S = cfg.data.S
-        self.rate_const = cfg.model.rate_const
+        self.S = S = cfg['model']['S']
+        self.rate_const = cfg['model']['rate_const']
         self.device = device
 
         rate = self.rate_const * np.ones((S,S))
@@ -102,11 +102,11 @@ class UniformRate():
 
 class GaussianTargetRate():
     def __init__(self, cfg, device):
-        self.S = S = cfg.data.S
-        self.rate_sigma = cfg.model.rate_sigma
-        self.Q_sigma = cfg.model.Q_sigma
-        self.time_exponential = cfg.model.time_exponential
-        self.time_base = cfg.model.time_base
+        self.S = S = cfg['model']['S']
+        self.rate_sigma = cfg['model']['rate_sigma']
+        self.Q_sigma = cfg['model']['Q_sigma']
+        self.time_exponential = cfg['model']['time_exponential']
+        self.time_base = cfg['model']['time_base']
         self.device = device
 
         rate = np.zeros((S,S))
@@ -177,3 +177,4 @@ class GaussianTargetRate():
 
         return transitions
 
+RATE_MODELS = {'BirthDeath': BirthDeathForwardBase, 'Uniform': UniformRate, 'Gaussian': GaussianTargetRate}

@@ -13,12 +13,22 @@ model:
   dropout: 0.1
 
   #diffusion parameters
+  continuous: True
   num_timesteps: 200
-  beta_schedule: 'cosine'
-  loss_terms: ['mse','vb']
+  rate_model: 'Uniform'
+  min_time: 0.01
+  loss_terms: ['elbo', 'nll']
   length_loss: 'cross_entropy'
   pad_limit: 20
   diffuseq: false
+
+  #continuous model parameters
+  rate_sigma: 3.0
+  Q_sigma: 20.0
+  time_exponential: 1000.0
+  time_base: 0.5
+  sigma_min: 1.0
+  sigma_max: 100.0
   
 training:
   batch_size: 64

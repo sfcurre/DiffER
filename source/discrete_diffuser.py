@@ -14,11 +14,11 @@ and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/t
 '''
 
 class DiscreteDiffuser(nn.Module):
-    def __init__(self, tokeniser, num_timesteps, forward_pred, max_seq_len, beta_schedule='cosine', pad_limit=20):
+    def __init__(self, tokeniser, forward_pred, num_timesteps, max_seq_len, beta_schedule='cosine', pad_limit=20):
         super(DiscreteDiffuser, self).__init__()
         self.tokeniser = tokeniser
-        self.num_timesteps = num_timesteps
         self.forward_pred = forward_pred
+        self.num_timesteps = num_timesteps
         self.max_seq_len = max_seq_len
         self.pad_limit = pad_limit
         self.pad_token_idx  = self.tokeniser.vocab[self.tokeniser.pad_token]
