@@ -106,10 +106,13 @@ class ContinuousDiffuser(nn.Module):
         return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask
 
     def q_sample(self, x_start, t):
+        x_start = x_start.permute(0, 2, 1)
         B, S, T = x_start.shape
         device = x_start.device
 
-        x_start = x_start.view(B, S * T)
+        # raise AssertionError(x_start.shape)
+
+        x_start = x_start.reshape(B, S * T)
         B, D = x_start.shape
         
         qt0 = self.rate_model.transition(t).to(device)
@@ -133,6 +136,7 @@ class ContinuousDiffuser(nn.Module):
             torch.arange(B*D, device=device),
             x_t.long().flatten()
         ] = 0.0 # 0 the diagonals
+        # raise AssertionError(rate_vals_square.shape)
         rate_vals_square = rate_vals_square.view(B, D, S)
         rate_vals_square_dimsum = torch.sum(rate_vals_square, dim=2).view(B, D)
         square_dimcat = torch.distributions.categorical.Categorical(
@@ -155,7 +159,9 @@ class ContinuousDiffuser(nn.Module):
             square_dims
         ] = square_newval_samples
         # x_tilde (B, D)
-        return x_tilde.view(B, S, T)
+        x_tilde = x_tilde.view(B, S, T)
+        x_tilde = x_tilde.permute(1, 0, 2)
+        return x_tilde
         
     def sample_time(self, size):
         return torch.rand((size,)) * (1.0 - self.min_time) + self.min_time
