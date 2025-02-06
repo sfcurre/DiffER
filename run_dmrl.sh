@@ -23,7 +23,7 @@ conda activate deepchem
 cd ~/Retro-Diffusion
 
 nvidia-smi
-python train.py --name BackwardDiffusion_PadLimit20 --config_path configs/pad_limit_20.yaml
+# python train.py --name BackwardDiffusion_PadLimit20 --config_path configs/pad_limit_20.yaml
 # python train.py --name BackwardDiffusion_PadLimit20_Fine1 --config_path configs/pad_limit_20.yaml --load out/models/BackwardDiffusion_PadLimit20_29.pkl
 
-# python train.py --name BackwardDiffusionContinuous_PadLimit20 --config_path configs/pad_limit_20_continuous.yaml
+python train.py --name BackwardDiffusionContinuous_PadLimit20 --config_path configs/pad_limit_20_continuous.yaml

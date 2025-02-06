@@ -88,8 +88,8 @@ class ContinuousDiffuser(nn.Module):
         input_mask = inputs["original_pad_masks"]
         
         input_token_ids = self.tokeniser.convert_tokens_to_ids(input_tokens)
-        
         input_token_ids = torch.tensor(input_token_ids)
+
         if noised:
             #importance sample t
             if t is None:
@@ -291,8 +291,8 @@ class ContinuousDiffuser(nn.Module):
         x_start = x_start.permute(1, 0, 2)
         device = x_logits.device
 
-        qt0 = self.rate_model.transition(ts).to(device)
-        rate = self.rate_model.rate(ts).to(device)
+        qt0 = self.rate_model.transition(ts.to(self.rate_model.device)).to(device)
+        rate = self.rate_model.rate(ts.to(self.rate_model.device)).to(device)
 
         B, D, S = x_start.shape
         x_start = x_start.max(dim=-1)[1]
