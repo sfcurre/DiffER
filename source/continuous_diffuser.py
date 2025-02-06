@@ -26,8 +26,8 @@ class ContinuousDiffuser(nn.Module):
         self.pad_limit = pad_limit
         self.pad_token_idx  = self.tokeniser.vocab[self.tokeniser.pad_token]
 
-        self.Lt_history = torch.zeros(num_timesteps)
-        self.Lt_count = torch.zeros(num_timesteps)
+        self.ratio_eps = 1e-9
+        self.update_Lt = False
 
     def __call__(self, batch):
         return self._collate(batch)
@@ -90,6 +90,12 @@ class ContinuousDiffuser(nn.Module):
         input_token_ids = self.tokeniser.convert_tokens_to_ids(input_tokens)
         
         input_token_ids = torch.tensor(input_token_ids)
+        if noised:
+            #importance sample t
+            if t is None:
+                t = self.sample_time(size=len(input_tokens))
+            input_token_ids = self.q_sample(input_token_ids, t)
+
         input_token_ids = F.one_hot(input_token_ids, len(self.tokeniser))
         input_pad_mask = torch.tensor(input_mask, dtype=torch.bool).transpose(0, 1)
 
@@ -97,23 +103,14 @@ class ContinuousDiffuser(nn.Module):
         input_pad_mask = input_pad_mask[:self.max_seq_len]
 
         if noised:
-            #importance sample t
-            if t is None:
-                t = self.sample_time(size=len(input_tokens))
-            input_token_ids = self.q_sample(input_token_ids, t)
-            return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask, t
+            return torch.permute(input_token_ids, (1, 0, 2)), input_pad_mask, t
         
-        return torch.permute(input_token_ids, (2, 0, 1)), input_pad_mask
+        return torch.permute(input_token_ids, (1, 0, 2)), input_pad_mask
 
     def q_sample(self, x_start, t):
-        x_start = x_start.permute(0, 2, 1)
-        B, S, T = x_start.shape
-        device = x_start.device
-
-        # raise AssertionError(x_start.shape)
-
-        x_start = x_start.reshape(B, S * T)
         B, D = x_start.shape
+        S = len(self.tokeniser)
+        device = x_start.device
         
         qt0 = self.rate_model.transition(t).to(device)
         rate = self.rate_model.rate(t).to(device)
@@ -136,7 +133,7 @@ class ContinuousDiffuser(nn.Module):
             torch.arange(B*D, device=device),
             x_t.long().flatten()
         ] = 0.0 # 0 the diagonals
-        # raise AssertionError(rate_vals_square.shape)
+
         rate_vals_square = rate_vals_square.view(B, D, S)
         rate_vals_square_dimsum = torch.sum(rate_vals_square, dim=2).view(B, D)
         square_dimcat = torch.distributions.categorical.Categorical(
@@ -159,21 +156,11 @@ class ContinuousDiffuser(nn.Module):
             square_dims
         ] = square_newval_samples
         # x_tilde (B, D)
-        x_tilde = x_tilde.view(B, S, T)
-        x_tilde = x_tilde.permute(1, 0, 2)
         return x_tilde
         
     def sample_time(self, size):
         return torch.rand((size,)) * (1.0 - self.min_time) + self.min_time
         
-    def update_Lt(self, t, kl):
-        t = t.cpu()
-        Lt2 = kl.pow(2).cpu()
-        Lt2_prev = self.Lt_history.gather(dim=0, index=t)
-        new_Lt_history = (0.1 * Lt2 + 0.9 * Lt2_prev).detach()
-        self.Lt_history.scatter_(dim=0, index=t, src=new_Lt_history)
-        self.Lt_count.scatter_add_(dim=0, index=t, src=torch.ones_like(Lt2))
-
     def get_lengths_from_padding(self, pad_mask):
         lengths = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
         return lengths.squeeze()
@@ -218,8 +205,7 @@ class ContinuousDiffuser(nn.Module):
 
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = tgt_tokens.device
-        B, S, T = tgt_tokens.shape
-        D = S * T
+        B, D, S = tgt_tokens.shape
 
         for idx, t in enumerate(ts[0:-1]):
             h = ts[idx] - ts[idx+1]
@@ -229,19 +215,17 @@ class ContinuousDiffuser(nn.Module):
             rate = self.rate_model.rate(t_tensor).to(device)
 
             token_output = model.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor.to(device))
-            p0t = F.softmax(token_output, dim=2) # (N, D, S)
-
-            x_0max = torch.max(p0t, dim=2)[1]
+            p0t = F.softmax(token_output, dim=2) # (B, D, S)
             
             qt0_denom = qt0[
                 torch.arange(B, device=device).repeat_interleave(D*S),
                 torch.arange(S, device=device).repeat(B*D),
                 tgt_tokens.long().flatten().repeat_interleave(S)
-            ].view(B,D,S) + 1e-9
+            ].view(B,D,S) + self.ratio_eps
 
             # First S is x0 second S is x tilde
 
-            qt0_numer = qt0 # (N, S, S)
+            qt0_numer = qt0 # (B, S, S)
 
             forward_rates = rate[
                 torch.arange(B, device=device).repeat_interleave(D*S),
@@ -302,20 +286,23 @@ class ContinuousDiffuser(nn.Module):
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])
 
     def calc_elbo(self, ts, x_logits, x_tilde, x_start):
+        x_logits = x_logits.permute(1, 0, 2)
+        x_tilde = x_tilde.permute(1, 0, 2)
+        x_start = x_start.permute(1, 0, 2)
         device = x_logits.device
 
         qt0 = self.rate_model.transition(ts).to(device)
         rate = self.rate_model.rate(ts).to(device)
 
-        B, C, T = x_start.shape
-        x_start = x_start.view(B, C * T)
+        B, D, S = x_start.shape
+        x_start = x_start.max(dim=-1)[1]
+        x_tilde = x_tilde.max(dim=-1)[1]
 
         # ---------- First term of ELBO (regularization) ---------------
         p0t_sig = F.softmax(x_logits, dim=2) # (B, D, S)
         p0t_reg = p0t_sig
-        reg_x = x_tilde.view(B, -1)
+        reg_x = x_tilde
 
-        B, D, S = p0t_reg.shape
 
         # For (B, D, S, S) first S is x_0 second S is x'
         mask_reg = torch.ones((B,D,S), device=device)

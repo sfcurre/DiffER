@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
 from source.discrete_diffuser import DiscreteDiffuser
+from source.continuous_diffuser import ContinuousDiffuser
+from source.rate_models import RATE_MODELS
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.diffuseq_model import DiffuseqModel
@@ -17,6 +19,8 @@ USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
 if use_gpu:
     print("Using CUDA.")
+else:
+    print("Using CPU.")
 
 #========================================================================
 def main(name, config, load, num_samples, test, pred_lengths):
@@ -39,12 +43,22 @@ def main(name, config, load, num_samples, test, pred_lengths):
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // config['training']['gpus']
     
-    diffuser = DiscreteDiffuser(tokeniser,
-                                forward_pred=forward_pred,
-                                num_timesteps=config['model']['num_timesteps'],
-                                max_seq_len=config['model']['max_seq_len'],
-                                beta_schedule=config['model']['beta_schedule'],
-                                pad_limit=config['model']['pad_limit'])
+    if config['model']['continuous']:
+        config['model']['S'] = len(tokeniser)
+        diffuser = ContinuousDiffuser(tokeniser,
+                                      forward_pred=forward_pred,
+                                      num_timesteps=config['model']['num_timesteps'],
+                                      max_seq_len=config['model']['max_seq_len'],
+                                      rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
+                                      min_time=config['model']['min_time'],
+                                      pad_limit=config['model']['pad_limit'])
+    else:
+        diffuser = DiscreteDiffuser(tokeniser,
+                                    forward_pred=forward_pred,
+                                    num_timesteps=config['model']['num_timesteps'],
+                                    max_seq_len=config['model']['max_seq_len'],
+                                    beta_schedule=config['model']['beta_schedule'],
+                                    pad_limit=config['model']['pad_limit'])
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset,
@@ -103,11 +117,11 @@ def main(name, config, load, num_samples, test, pred_lengths):
         
         trainer.move_batch_to_gpu(batch)
         for _ in range(num_samples):
-            sampled_mols, lprobs = diffuser.sample(batch,
-                                                   model,
-                                                   verbose=False,
-                                                   pred_lengths=pred_lengths,
-                                                   clean=False)
+            sampled_mols, _ = diffuser.sample(batch,
+                                              model,
+                                              verbose=False,
+                                              pred_lengths=pred_lengths,
+                                              clean=False)
             for j, smi in enumerate(sampled_mols):
                 targets[batch['encoder_smiles'][j]]['samples'].append(smi)
                 

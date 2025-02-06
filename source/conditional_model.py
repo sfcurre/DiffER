@@ -84,7 +84,6 @@ class ConditionalModel(nn.Module):
     def forward(self, batch):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
-        print(encoder_input.shape)
         
         memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
         

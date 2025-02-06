@@ -147,9 +147,9 @@ class DiffusionModelTrainer:
 
         return metrics, sampled_smiles
 
-    def _calc_loss(self, batch_input, token_output, update_Lt=True):
+    def _calc_loss(self, batch_input, token_output):
         tokens = batch_input["target"]
-        pad_mask = batch_input["target_mask"]
+        # pad_mask = batch_input["target_mask"]
         x_start = batch_input["target_onehots"]
         t = batch_input['decoder_t']
 
@@ -169,14 +169,14 @@ class DiffusionModelTrainer:
             mse_loss = mse_loss.sum(dim=(0, 2))
             loss_terms['mse'] = mse_loss.mean()
 
-        if 'kl' in self.loss or 'vb' in self.loss or update_Lt:
+        if 'kl' in self.loss or 'vb' in self.loss or self.diffuser.update_Lt:
             log_x_t = batch_input['decoder_input'].permute((1, 2, 0))
             log_true_prob = self.diffuser.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)), log_x_t, t)
             log_model_prob = self.diffuser.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)), log_x_t, t)
             kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob))
             kl = kl.sum(dim=(1, 2))
-            if update_Lt:
-                self.diffuser.update_Lt(t, kl)
+            if self.diffuser.update_Lt:
+                self.diffuser._update_Lt(t, kl)
             loss_terms['kl'] = kl.mean()
 
         if 'vb' in self.loss:

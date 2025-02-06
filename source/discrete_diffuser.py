@@ -43,6 +43,7 @@ class DiscreteDiffuser(nn.Module):
 
         self.Lt_history = torch.zeros(num_timesteps)
         self.Lt_count = torch.zeros(num_timesteps)
+        self.update_Lt = True
 
     def __call__(self, batch):
         return self._collate(batch)
@@ -195,7 +196,7 @@ class DiscreteDiffuser(nn.Module):
         else:
             raise ValueError
         
-    def update_Lt(self, t, kl):
+    def _update_Lt(self, t, kl):
         t = t.cpu()
         Lt2 = kl.pow(2).cpu()
         Lt2_prev = self.Lt_history.gather(dim=0, index=t)
