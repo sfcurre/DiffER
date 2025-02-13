@@ -24,5 +24,8 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-python eval.py --name BackwardDiffusion_PadLimit20_Fine1 --config_path configs/pad_limit_20.yaml --load out/models/BackwardDiffusion_PadLimit20_Fine1_29.pkl \
-               --num_samples 1 --test
+# python eval.py --name BackwardDiffusion_PadLimit20_Fine1 --config_path configs/pad_limit_20.yaml --load out/models/BackwardDiffusion_PadLimit20_Fine1_29.pkl --num_samples 1 --test
+
+# python eval.py --name BackwardDiffusionContinuous_PadLimit20 --config_path configs/pad_limit_20_continuous.yaml --load out/models/BackwardDiffusionContinuous_PadLimit20_29.pkl --num_samples 1
+
+python eval.py --name BackwardDiffusionContinuous_PadLimit20_Fine1 --config_path configs/pad_limit_20_continuous.yaml --load out/models/BackwardDiffusionContinuous_PadLimit20_Fine1_29.pkl --num_samples 1

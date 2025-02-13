@@ -205,7 +205,7 @@ class ContinuousDiffuser(nn.Module):
 
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = tgt_tokens.device
-        B, D, S = tgt_tokens.shape
+        D, B, S = tgt_tokens.shape
 
         for idx, t in enumerate(ts[0:-1]):
             h = ts[idx] - ts[idx+1]
@@ -214,8 +214,9 @@ class ContinuousDiffuser(nn.Module):
             qt0 = self.rate_model.transition(t_tensor).to(device)
             rate = self.rate_model.rate(t_tensor).to(device)
 
-            token_output = model.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor.to(device))
-            p0t = F.softmax(token_output, dim=2) # (B, D, S)
+            token_output = model.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor.to(device))            
+            p0t = F.softmax(token_output, dim=2).transpose(0, 1) # (B, D, S)
+            tgt_tokens = tgt_tokens.max(dim=-1)[1].transpose(0, 1)
             
             qt0_denom = qt0[
                 torch.arange(B, device=device).repeat_interleave(D*S),
@@ -233,9 +234,9 @@ class ContinuousDiffuser(nn.Module):
                 tgt_tokens.long().flatten().repeat_interleave(S)
             ].view(B, D, S)
 
-            inner_sum = (p0t / qt0_denom) @ qt0_numer # (N, D, S)
+            inner_sum = (p0t / qt0_denom) @ qt0_numer # (B, D, S)
 
-            reverse_rates = forward_rates * inner_sum # (N, D, S)
+            reverse_rates = forward_rates * inner_sum # (B, D, S)
 
             reverse_rates[
                 torch.arange(B, device=device).repeat_interleave(D),
@@ -251,7 +252,7 @@ class ContinuousDiffuser(nn.Module):
             xp = tgt_tokens + overall_jump
             x_new = torch.clamp(xp, min=0, max=S-1)
 
-            tgt_tokens = x_new
+            tgt_tokens = F.one_hot(x_new.long(), num_classes=len(self.tokeniser)).transpose(0, 1)
 
             if verbose and (idx <= 10 or idx == 50 or (idx) % 100 == 0):
                 ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
@@ -274,7 +275,7 @@ class ContinuousDiffuser(nn.Module):
             print('-' * 20)
 
         tgt_tokens = model.decode(tgt_tokens, length_mask, memory, memory_pad_mask, t_tensor.to(device))
-
+        
         ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
         tokens = self.tokeniser.convert_ids_to_tokens(ids)
         sampled_mols = self.tokeniser.detokenise(tokens)
