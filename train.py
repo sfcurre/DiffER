@@ -107,10 +107,16 @@ if __name__ == '__main__':
     parser.add_argument("--name", type=str)
     parser.add_argument("--config_path", type=str)
     parser.add_argument("--load", type=str, default='')
+    parser.add_argument("--pad_limit", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
     with open(config_file, 'r') as stream:
         config = yaml.load(stream, yaml.FullLoader)
+
+    if config['model']['pad_limit'] is None and args.pad_limit is not None:
+        config['model']['pad_limit'] = args.pad_limit
+    elif config['model']['pad_limit'] is None:
+        raise ValueError('Pad limit not specified in config or command line arguments.')
 
     main(args.name, config, args.load)
