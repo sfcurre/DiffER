@@ -11,6 +11,7 @@ from source.rate_models import RATE_MODELS
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.diffuseq_model import DiffuseqModel
+from source.conditional_model_legacy import ConditionalModelLegacy
 from source.trainer import DiffusionModelTrainer
 
 import json
@@ -71,6 +72,8 @@ def main(name, config, load, num_samples, test, pred_lengths):
     model_class = ConditionalModel
     if config['model']['diffuseq']:
         model_class = DiffuseqModel
+    if config['model']['legacy']:
+        model_class = ConditionalModelLegacy
     
     model = model_class(
         tokeniser=tokeniser,

@@ -11,6 +11,7 @@ from source.continuous_diffuser import ContinuousDiffuser
 from source.rate_models import RATE_MODELS
 from source.conditional_model import ConditionalModel
 from source.diffuseq_model import DiffuseqModel
+from source.conditional_model_legacy import ConditionalModelLegacy
 from source.trainer import DiffusionModelTrainer
 
 USE_GPU = True
@@ -67,6 +68,8 @@ def main(name, config, load):
     model_class = ConditionalModel
     if config['model']['diffuseq']:
         model_class = DiffuseqModel
+    if config['model']['legacy']:
+        model_class = ConditionalModelLegacy
     
     model = model_class(
         tokeniser=tokeniser,

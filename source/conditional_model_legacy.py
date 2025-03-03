@@ -12,7 +12,7 @@ This code is heavily inspired by Chemformer (https://github.com/MolecularAI/Chem
 and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/tree/main)
 '''
 
-class ConditionalModel(nn.Module):
+class ConditionalModelLegacy(nn.Module):
     def __init__(self,
         tokeniser,
         max_seq_len,
@@ -23,7 +23,7 @@ class ConditionalModel(nn.Module):
         activation,
         dropout=0.1,
         ):
-        super(ConditionalModel, self).__init__()
+        super(ConditionalModelLegacy, self).__init__()
 
         self.tokeniser = tokeniser
         self.max_seq_len = max_seq_len
@@ -39,11 +39,9 @@ class ConditionalModel(nn.Module):
 
         self.emb = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_idx)
         self.time_emb = SinusoidalPosEmb(d_model)
+        self.embed_lengths = nn.Embedding(self.max_seq_len, self.d_model)
         self.dropout = nn.Dropout(dropout)
 
-        self.length_rep = nn.Embedding(1, self.d_model)
-        self.length_map = nn.Linear(self.max_seq_len, self.d_model)
-        
         enc_norm = nn.LayerNorm(d_model)
         enc_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
@@ -114,13 +112,16 @@ class ConditionalModel(nn.Module):
     def encode(self, encoder_input, encoder_pad_mask):
         encoder_embs = self.embed_log_onehot(encoder_input)
         
-        len_tokens = self.length_rep(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32, device=encoder_embs.device))
+        len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32, device=encoder_embs.device))
+        # len_tokens = self.embed_lengths(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32).to(encoder_embs.get_device()))
+        # len_tokens = self.embed_lengths(encoder_pad_mask.sum(-1).unsqueeze(-1)) # input to embedding is source length
         encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
 
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
 
-        predicted_lengths_logits = self.length_map(model_output[0, :, :])
+        predicted_lengths_logits = torch.matmul(model_output[0, :, :], self.embed_lengths.weight.transpose(0, 1)).float()
+        predicted_lengths_logits[:, 0] += float('-inf')   # Cannot predict the len_token
         predicted_lengths = F.log_softmax(predicted_lengths_logits, dim=-1)
 
         return model_output, encoder_pad_mask, predicted_lengths
