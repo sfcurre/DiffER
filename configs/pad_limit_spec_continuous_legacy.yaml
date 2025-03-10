@@ -15,13 +15,13 @@ model:
   #diffusion parameters
   continuous: True
   num_timesteps: 200
-  rate_model: 'Gaussian'
+  rate_model: 'Uniform'
   min_time: 0.01
   loss_terms: ['elbo', 'nll']
   length_loss: 'cross_entropy'
   pad_limit: null
   diffuseq: false
-  legacy: false
+  legacy: true
 
   #continuous model parameters
   rate_const: 0.03

@@ -101,8 +101,8 @@ def main(name, config, load, num_samples, test, pred_lengths):
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
 
-    if not os.path.exists(f'out/samples/{name}/'):
-        os.mkdir(f'out/samples/{name}/')
+    # if not os.path.exists(f'out/samples/{name}/'):
+    #     os.mkdir(f'out/samples/{name}/')
 
     print(f'Evaluating {name}...')
   
@@ -110,36 +110,36 @@ def main(name, config, load, num_samples, test, pred_lengths):
     with torch.no_grad():
         trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
 
-    torch.manual_seed(1998) 
-    all_targets = {}
-    for i, batch in enumerate(dataloaders[DATASET]):
+        torch.manual_seed(1998) 
+        all_targets = {}
+        for i, batch in enumerate(dataloaders[DATASET]):
 
-        targets = {}
-        for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
-            targets[source] = {'target': target, 'samples':[]}
-        
-        trainer.move_batch_to_gpu(batch)
-        for _ in range(num_samples):
-            sampled_mols, _ = diffuser.sample(batch,
-                                              model,
-                                              verbose=False,
-                                              pred_lengths=pred_lengths,
-                                              clean=False)
-            for j, smi in enumerate(sampled_mols):
-                targets[batch['encoder_smiles'][j]]['samples'].append(smi)
-                
-        print(f'Batch {i} complete.')
-        
-        for source in targets:
-            if source in all_targets:
-                all_targets[source]['samples'].extend(targets[source]['samples'])
-            else:
-                all_targets[source] = targets[source]
-        
-    with open(f"out/samples/{name}/{name}_samples.json", 'w') as fp:
-        json.dump(all_targets, fp)
+            targets = {}
+            for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
+                targets[source] = {'target': target, 'samples':[]}
+            
+            trainer.move_batch_to_gpu(batch)
+            for _ in range(num_samples):
+                sampled_mols, _ = diffuser.sample(batch,
+                                                model,
+                                                verbose=False,
+                                                pred_lengths=pred_lengths,
+                                                clean=False)
+                for j, smi in enumerate(sampled_mols):
+                    targets[batch['encoder_smiles'][j]]['samples'].append(smi)
+                    
+            print(f'Batch {i} complete.')
+            
+            for source in targets:
+                if source in all_targets:
+                    all_targets[source]['samples'].extend(targets[source]['samples'])
+                else:
+                    all_targets[source] = targets[source]
+            
+        with open(f"out/samples/{name}_samples.json", 'w') as fp:
+            json.dump(all_targets, fp)
 
-    print('Evaluation complete.')
+        print('Evaluation complete.')
 
 if __name__ == '__main__':
 
