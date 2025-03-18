@@ -12,6 +12,7 @@ from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.diffuseq_model import DiffuseqModel
 from source.conditional_model_legacy import ConditionalModelLegacy
+from source.conditional_model_attn_eval import ConditionalModelAttnEval
 from source.trainer import DiffusionModelTrainer
 
 import json
@@ -75,6 +76,9 @@ def main(name, config, load, num_samples, test, pred_lengths):
     if config['model']['legacy']:
         model_class = ConditionalModelLegacy
     
+    if args.record_attns:
+        model_class = ConditionalModelAttnEval
+    
     model = model_class(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
@@ -112,8 +116,9 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
     torch.manual_seed(1998) 
     all_targets = {}
+    attns = {}
     for i, batch in enumerate(dataloaders[DATASET]):
-
+        
         targets = {}
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
@@ -127,7 +132,21 @@ def main(name, config, load, num_samples, test, pred_lengths):
                                               clean=False)
             for j, smi in enumerate(sampled_mols):
                 targets[batch['encoder_smiles'][j]]['samples'].append(smi)
-                
+
+        if i < args.record_attns:
+            sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,
+                                                                   model,
+                                                                   verbose=False,
+                                                                   pred_lengths=pred_lengths,
+                                                                   clean=False,
+                                                                   record_attns=True)
+            for j, smi in enumerate(sampled_mols):
+                attns[batch['encoder_smiles'][j]] = smi_data = {}
+                smi_data['target'] = batch['target_smiles'][j]
+                smi_data['sample'] = smi
+                smi_data['in_attns'] = {k: v[:, i] for k, v in in_attns.items()}
+                smi_data['out_attns'] = {t: {k: v[:, i] for k, v in out_t} for t, out_t in out_attns}
+
         print(f'Batch {i} complete.')
         
         for source in targets:
@@ -138,6 +157,9 @@ def main(name, config, load, num_samples, test, pred_lengths):
         
     with open(f"out/samples/{name}/{name}_samples.json", 'w') as fp:
         json.dump(all_targets, fp)
+
+    if args.record_attns:
+        torch.save(attns, f"out/samples/attns/{name}_attns.json")
 
     print('Evaluation complete.')
 
@@ -150,6 +172,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_samples", type=int, default=20)
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--use_true_lengths", action='store_true')
+    parser.add_argument("--record_attns", type=int, default=0)
     args = parser.parse_args()
 
     config_file = args.config_path

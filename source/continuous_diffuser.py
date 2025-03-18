@@ -180,7 +180,7 @@ class ContinuousDiffuser(nn.Module):
         tgt_tokens = (~length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True):
+    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True, record_attns=False):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = model.encode(encoder_input, encoder_pad_mask)
@@ -203,11 +203,22 @@ class ContinuousDiffuser(nn.Module):
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')
 
+        if record_attns:
+            in_attns = model.get_attn('encoder')
+            out_attns = {}
+
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = tgt_tokens.device
         D, B, S = tgt_tokens.shape
 
         for idx, t in enumerate(ts[0:-1]):
+            if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 200]:
+                ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
+                tokens = self.tokeniser.convert_ids_to_tokens(ids)
+                sampled_mols = self.tokeniser.detokenise(tokens)
+                m = sampled_mols[0]
+                out_attns[idx + 1] = [m]
+
             h = ts[idx] - ts[idx+1]
             t_tensor = torch.full((length_mask.shape[0],), t, device=self.rate_model.device)
 
@@ -270,6 +281,9 @@ class ContinuousDiffuser(nn.Module):
 
                 if verbose:
                     print(f'{t}: {m}')
+            
+            if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 200]:
+                out_attns[idx + 1].append(model.get_attns('decoder'))
 
         if verbose:
             print('-' * 20)
@@ -283,6 +297,9 @@ class ContinuousDiffuser(nn.Module):
         sampled_mols = [m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols]
         if clean:
             sampled_mols = [m.replace('?', '') for m in sampled_mols]
+
+        if record_attns:
+            return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0]), in_attns, out_attns
 
         return sampled_mols, torch.log(tgt_tokens.max(dim=-1)[0])
 
