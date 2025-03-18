@@ -105,8 +105,8 @@ def main(name, config, load, num_samples, test, pred_lengths):
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
 
-    if not os.path.exists(f'out/samples/{name}/'):
-        os.mkdir(f'out/samples/{name}/')
+    # if not os.path.exists(f'out/samples/{name}/'):
+    #     os.mkdir(f'out/samples/{name}/')
 
     print(f'Evaluating {name}...')
   
@@ -155,7 +155,7 @@ def main(name, config, load, num_samples, test, pred_lengths):
             else:
                 all_targets[source] = targets[source]
         
-    with open(f"out/samples/{name}/{name}_samples.json", 'w') as fp:
+    with open(f"out/samples/{name}_samples.json", 'w') as fp:
         json.dump(all_targets, fp)
 
     if args.record_attns:

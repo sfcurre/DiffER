@@ -21,7 +21,7 @@ model:
   length_loss: 'cross_entropy'
   pad_limit: null
   diffuseq: false
-  legacy: false
+  legacy: true
 
   #continuous model parameters
   rate_const: 0.03

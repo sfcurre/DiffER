@@ -42,7 +42,7 @@ class ConditionalModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         self.length_rep = nn.Embedding(1, self.d_model)
-        self.length_map = nn.Linear(self.max_seq_len, self.d_model)
+        self.length_map = nn.Linear(self.d_model, self.max_seq_len)
         
         enc_norm = nn.LayerNorm(d_model)
         enc_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True)

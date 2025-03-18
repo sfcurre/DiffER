@@ -20,6 +20,7 @@ model:
   length_loss: 'cross_entropy'
   pad_limit: null
   diffuseq: false
+  legacy: false
   
 training:
   batch_size: 64
