@@ -124,15 +124,17 @@ def main(name, config, load, num_samples, test, pred_lengths):
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
         
-        move_batch_to_gpu(batch)
-        for _ in range(num_samples):
-            sampled_mols, _ = diffuser.sample(batch,
-                                              model,
-                                              verbose=False,
-                                              pred_lengths=pred_lengths,
-                                              clean=False)
-            for j, smi in enumerate(sampled_mols):
-                targets[batch['encoder_smiles'][j]]['samples'].append(smi)
+        if use_gpu:
+            move_batch_to_gpu(batch)
+
+        sampled_mols, _ = diffuser.sample(batch,
+                                            model,
+                                            verbose=False,
+                                            pred_lengths=pred_lengths,
+                                            clean=False,
+                                            num_samples=num_samples)
+        for j, smi in enumerate(sampled_mols):
+            targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
         if i < args.record_attns:
             sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,

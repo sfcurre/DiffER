@@ -21,7 +21,7 @@ class RLDiffuser(ContinuousDiffuser):
             *args, **kwargs
         )
         
-    def sample(self, batch, model, guidance_model, optimizer, gamma=0.5, verbose=True, pred_lengths=True, clean=True, record_attns=False):
+    def sample(self, batch, model, guidance_model, optimizer, gamma=0.5, verbose=True, pred_lengths=True, clean=True, record_attns=False, num_samples=1):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = model.encode(encoder_input, encoder_pad_mask)
@@ -47,6 +47,12 @@ class RLDiffuser(ContinuousDiffuser):
         if record_attns:
             in_attns = model.get_attn('encoder')
             out_attns = {}
+
+        if num_samples > 1:
+            tgt_tokens = tgt_tokens.repeat(1, num_samples, 1)
+            length_mask = length_mask.repeat(num_samples, 1)
+            memory = memory.repeat(num_samples, 1, 1)
+            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
 
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = tgt_tokens.device
@@ -84,10 +90,10 @@ class RLDiffuser(ContinuousDiffuser):
                 classifier_log_prob[..., None, None]
             ).detach().requires_grad_(False)
 
-            valid_scores, memory_scores = guidance_model.get_scores(tgt_tokens)
+            valid_scores, scores = guidance_model.get_scores(tgt_tokens)
 
             optimizer.zero_grad()
-            classifier_loss = F.binary_cross_entropy_with_logits(classifier_output, memory_scores)
+            classifier_loss = guidance_model.get_loss(classifier_output, scores)
             classifier_loss.sum().backward()
             optimizer.step()
 

@@ -13,6 +13,7 @@ from source.diffuseq_model import DiffuseqModel
 from source.conditional_model_legacy import ConditionalModelLegacy
 from source.conditional_model_attn_eval import ConditionalModelAttnEval
 from source.guidance_model import GuidanceModel
+from source.particle_guidance_model import ParticleGuidanceModel
 from source.utils import move_batch_to_gpu, canonicalize
 
 import json
@@ -106,26 +107,28 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
         assert len(set(canonicals)) == 1, "All source molecules in a batch must be the same."
         
-        guidance = GuidanceModel(model)
+        if args.particle_guidance:
+            guidance = ParticleGuidanceModel(model)
+        else:
+            guidance = GuidanceModel(model)
         optimizer = optim.Adam(guidance.parameters(),
                                lr=config['training']['learning_rate'],
                                weight_decay=config['training']['weight_decay'])
 
         if use_gpu:
             guidance = guidance.cuda()
-            move_batch_to_gpu(batch)
-        
-        for _ in range(num_samples):
-            sampled_mols, _ = diffuser.sample(batch,
-                                              model,
-                                              guidance,
-                                              optimizer,
-                                              gamma=args.gamma,
-                                              verbose=False,
-                                              pred_lengths=pred_lengths,
-                                              clean=False)
-            for j, smi in enumerate(sampled_mols):
-                targets[batch['encoder_smiles'][j]]['samples'].append(smi)
+            move_batch_to_gpu(batch)    
+    
+        sampled_mols, _ = diffuser.sample(batch,
+                                            model,
+                                            guidance,
+                                            optimizer,
+                                            gamma=args.gamma,
+                                            verbose=False,
+                                            pred_lengths=pred_lengths,
+                                            clean=False)
+        for j, smi in enumerate(sampled_mols):
+            targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
         if i < args.record_attns:
             sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,
@@ -170,6 +173,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
     parser.add_argument("--gamma", type=float, default=0.5)
+    parser.add_argument("--particle_guidance", action='store_true')
     args = parser.parse_args()
 
     config_file = args.config_path

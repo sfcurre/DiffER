@@ -223,7 +223,7 @@ class DiscreteDiffuser(nn.Module):
         tgt_tokens = (~length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True):
+    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True, num_samples=1):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = model.encode(encoder_input, encoder_pad_mask)
@@ -245,6 +245,12 @@ class DiscreteDiffuser(nn.Module):
     
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')
+
+        if num_samples > 1:
+            tgt_tokens = tgt_tokens.repeat(1, num_samples, 1)
+            length_mask = length_mask.repeat(num_samples, 1)
+            memory = memory.repeat(num_samples, 1, 1)
+            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
 
         for t in reversed(range(1, self.num_timesteps)):
             # My code likes (time, batch, tokens)

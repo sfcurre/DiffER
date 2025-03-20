@@ -180,7 +180,7 @@ class ContinuousDiffuser(nn.Module):
         tgt_tokens = (~length_mask.transpose(0, 1).unsqueeze(-1)) * tgt_tokens + length_mask.transpose(0, 1).unsqueeze(-1) * pad_token 
         return tgt_tokens, length_mask
 
-    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True, record_attns=False):
+    def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True, record_attns=False, num_samples=1):
         encoder_input = batch["encoder_input"]
         encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
         memory, memory_pad_mask, predicted_lengths = model.encode(encoder_input, encoder_pad_mask)
@@ -206,6 +206,12 @@ class ContinuousDiffuser(nn.Module):
         if record_attns:
             in_attns = model.get_attn('encoder')
             out_attns = {}
+
+        if num_samples > 1:
+            tgt_tokens = tgt_tokens.repeat(1, num_samples, 1)
+            length_mask = length_mask.repeat(num_samples, 1)
+            memory = memory.repeat(num_samples, 1, 1)
+            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
 
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = tgt_tokens.device
