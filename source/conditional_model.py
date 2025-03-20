@@ -53,8 +53,6 @@ class ConditionalModel(nn.Module):
         self.decoder = nn.TransformerDecoder(dec_layer, num_layers, norm=dec_norm)
 
         self.token_fc = nn.Linear(d_model, vocab_size)
-        self.loss_fn = nn.CrossEntropyLoss(reduction="none", ignore_index=pad_token_idx)
-        self.log_softmax = nn.LogSoftmax(dim=2)
 
         self._init_params()
         self.register_buffer("pos_emb", self.positional_embs())

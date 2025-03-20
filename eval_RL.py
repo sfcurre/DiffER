@@ -5,16 +5,15 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
-from source.discrete_diffuser import DiscreteDiffuser
-from source.continuous_diffuser import ContinuousDiffuser
+from source.RL_diffuser import RLDiffuser
 from source.rate_models import RATE_MODELS
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.diffuseq_model import DiffuseqModel
 from source.conditional_model_legacy import ConditionalModelLegacy
 from source.conditional_model_attn_eval import ConditionalModelAttnEval
-from source.trainer import DiffusionModelTrainer
-from source.utils import move_batch_to_gpu
+from source.guidance_model import GuidanceModel
+from source.utils import move_batch_to_gpu, canonicalize
 
 import json
 
@@ -46,27 +45,20 @@ def main(name, config, load, num_samples, test, pred_lengths):
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // config['training']['gpus']
     
-    if config['model']['continuous']:
-        config['model']['S'] = len(tokeniser)
-        diffuser = ContinuousDiffuser(tokeniser,
-                                      forward_pred=forward_pred,
-                                      num_timesteps=config['model']['num_timesteps'],
-                                      max_seq_len=config['model']['max_seq_len'],
-                                      rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
-                                      min_time=config['model']['min_time'],
-                                      pad_limit=config['model']['pad_limit'])
-    else:
-        diffuser = DiscreteDiffuser(tokeniser,
-                                    forward_pred=forward_pred,
-                                    num_timesteps=config['model']['num_timesteps'],
-                                    max_seq_len=config['model']['max_seq_len'],
-                                    beta_schedule=config['model']['beta_schedule'],
-                                    pad_limit=config['model']['pad_limit'])
+    config['model']['S'] = len(tokeniser)
+    diffuser = RLDiffuser(tokeniser,
+                          forward_pred=forward_pred,
+                          num_timesteps=config['model']['num_timesteps'],
+                          max_seq_len=config['model']['max_seq_len'],
+                          rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
+                          min_time=config['model']['min_time'],
+                          pad_limit=config['model']['pad_limit'])
+
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset,
-                                        batch_size=config['training']['batch_size'],
-                                        shuffle=True,
+                                        batch_size=20,
+                                        shuffle=False,
                                         num_workers=num_workers,
                                         collate_fn=diffuser)
     print("Finished datasets.")
@@ -95,25 +87,11 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
     if use_gpu:
         model = model.cuda()
- 
-    optimizer = optim.Adam(model.parameters(),
-                           lr=config['training']['learning_rate'],
-                           weight_decay=config['training']['weight_decay'])
-    
-    trainer = DiffusionModelTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
-                                    length_loss=config['model']['length_loss'], use_gpu=use_gpu)
-    
+
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
 
-    # if not os.path.exists(f'out/samples/{name}/'):
-    #     os.mkdir(f'out/samples/{name}/')
-
     print(f'Evaluating {name}...')
-  
-    torch.manual_seed(1998) 
-    with torch.no_grad():
-        trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
 
     torch.manual_seed(1998) 
     all_targets = {}
@@ -121,13 +99,28 @@ def main(name, config, load, num_samples, test, pred_lengths):
     for i, batch in enumerate(dataloaders[DATASET]):
         
         targets = {}
+        canonicals = []
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
+            canonicals.append(canonicalize(source))
+
+        assert len(set(canonicals)) == 1, "All source molecules in a batch must be the same."
         
-        move_batch_to_gpu(batch)
+        guidance = GuidanceModel(model)
+        optimizer = optim.Adam(guidance.parameters(),
+                               lr=config['training']['learning_rate'],
+                               weight_decay=config['training']['weight_decay'])
+
+        if use_gpu:
+            guidance = guidance.cuda()
+            move_batch_to_gpu(batch)
+        
         for _ in range(num_samples):
             sampled_mols, _ = diffuser.sample(batch,
                                               model,
+                                              guidance,
+                                              optimizer,
+                                              gamma=args.gamma,
                                               verbose=False,
                                               pred_lengths=pred_lengths,
                                               clean=False)
@@ -137,10 +130,12 @@ def main(name, config, load, num_samples, test, pred_lengths):
         if i < args.record_attns:
             sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,
                                                                    model,
+                                                                   guidance,
+                                                                   optimizer,
+                                                                   gamma=args.gamma,
                                                                    verbose=False,
                                                                    pred_lengths=pred_lengths,
-                                                                   clean=False,
-                                                                   record_attns=True)
+                                                                   clean=False)
             for j, smi in enumerate(sampled_mols):
                 attns[batch['encoder_smiles'][j]] = smi_data = {}
                 smi_data['target'] = batch['target_smiles'][j]
@@ -174,6 +169,7 @@ if __name__ == '__main__':
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
+    parser.add_argument("--gamma", type=float, default=0.5)
     args = parser.parse_args()
 
     config_file = args.config_path

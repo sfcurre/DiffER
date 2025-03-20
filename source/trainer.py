@@ -9,6 +9,8 @@ import torch.nn.functional as F
 
 from rdkit import Chem, RDLogger
 
+from .utils import move_batch_to_gpu
+
 '''
 This code is inspired by https://github.com/ehoogeboom/multinomial_diffusion/tree/main
 '''
@@ -99,16 +101,10 @@ class DiffusionModelTrainer:
  
         # with open(f'out/samples/{self.name}/sampled_mols_e{epoch.split()[0]}.json', 'w') as fp:
         #     json.dump(mols, fp)
-
-    def move_batch_to_gpu(self, batch):
-        for key, value in batch.items():
-            if hasattr(value, 'cuda'):
-                batch[key] = value.cuda()
-        batch['device'] = 'cuda'
         
     def train_step(self, batch):
         if self.use_gpu:
-            self.move_batch_to_gpu(batch)
+            move_batch_to_gpu(batch)
 
         self.model.train()
         self.optimizer.zero_grad()
@@ -123,7 +119,7 @@ class DiffusionModelTrainer:
 
     def val_step(self, batch, pred_lengths=True):
         if self.use_gpu:
-            self.move_batch_to_gpu(batch)
+            move_batch_to_gpu(batch)
 
         self.model.eval()
         output, lengths = self.model.forward(batch)
