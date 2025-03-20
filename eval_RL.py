@@ -151,11 +151,11 @@ def main(name, config, load, num_samples, test, pred_lengths):
             else:
                 all_targets[source] = targets[source]
         
-    with open(f"out/samples/{name}_samples.json", 'w') as fp:
-        json.dump(all_targets, fp)
+        with open(f"out/samples/{name}_samples.json", 'w') as fp:
+            json.dump(all_targets, fp)
 
-    if args.record_attns:
-        torch.save(attns, f"out/samples/attns/{name}_attns.json")
+        if args.record_attns:
+            torch.save(attns, f"out/samples/attns/{name}_attns.json")
 
     print('Evaluation complete.')
 
