@@ -3,7 +3,7 @@
 #SBATCH -N 1                    # use 1 node
 #SBATCH -n 1                    # 1 task
 #SBATCH --cpus-per-task 4       # cpu cores to use
-#SBATCH -t 0-6:00:00            # 0 days, 6 hours, 0 minutes, 0 seconds
+#SBATCH -t 0-12:00:00            # 0 days, 6 hours, 0 minutes, 0 seconds
 #SBATCH -p gpu_batch            # use the gpu partition
 #SBATCH -J RetroDiffusion       # Job name
 #SBATCH --mem=32000             # 32000 MB memory (RAM)
@@ -24,12 +24,14 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-PadLimit=80
-FineTune=1
+PadLimit=40
+FineTune=3
 FineTuneSub=$((FineTune-1))
 
 # python eval.py --name "BackwardDiffusion_PadLimit$PadLimit-${FineTune}" --config_path "configs/pad_limit_spec.yaml" --load "out/models/BackwardDiffusion_PadLimit${PadLimit}-${FineTune}_29.pkl" --num_samples 1
 
-python eval.py --name "BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 1
+# python eval.py --name "BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 1
 
-# python eval.py --name "BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous_gaussian.yaml" --load "out/models/BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 1
+python eval.py --name "BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous_gaussian.yaml" --load "out/models/BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 1
+
+# python eval.py --name "BackwardDiffusionContinuousAttn_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 0 --record_attns

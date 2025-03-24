@@ -22,8 +22,8 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-PadLimit=80
-FineTune=3
+PadLimit=20
+FineTune=1
 FineTuneSub=$((FineTune-1))
 
 # if (($FineTune == 0)); then
@@ -32,14 +32,26 @@ FineTuneSub=$((FineTune-1))
 #     python train.py --name "BackwardDiffusion_PadLimit$PadLimit-${FineTune}" --config_path "configs/pad_limit_spec.yaml" --load "out/models/BackwardDiffusion_PadLimit${PadLimit}-${FineTuneSub}_29.pkl" --pad_limit $PadLimit
 # fi
 
-if (($FineTune == 0)); then
-    python train.py --name "BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml"  --pad_limit $PadLimit
-else
-    python train.py --name "BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
-fi
+# if (($FineTune == 0)); then
+#     python train.py --name "BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml"  --pad_limit $PadLimit
+# else
+#     python train.py --name "BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
+# fi
 
 # if (($FineTune == 0)); then
 #     python train.py --name "BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous_gaussian.yaml"  --pad_limit $PadLimit
 # else
 #     python train.py --name "BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous_gaussian.yaml" --load "out/models/BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
 # fi
+
+# if (($FineTune == 0)); then
+#     python train.py --name "BackwardDiffusionContinuous_NoPadLimit-${FineTune}" --config_path "configs/no_pad_limit_continuous.yaml"
+# else
+#     python train.py --name "BackwardDiffusionContinuous_NoPadLimit-${FineTune}" --config_path "configs/no_pad_limit_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_NoPadLimit-${FineTuneSub}.pkl"
+# fi
+
+if (($FineTune == 0)); then
+    python train.py --name "ForwardDiffusionContinuous_NoPadLimit-${FineTune}" --config_path "configs/no_pad_limit_continuous_forward.yaml"
+else
+    python train.py --name "ForwardDiffusionContinuous_NoPadLimit-${FineTune}" --config_path "configs/no_pad_limit_continuous_forward.yaml" --load "out/models/ForwardDiffusionContinuous_NoPadLimit-${FineTuneSub}.pkl"
+fi

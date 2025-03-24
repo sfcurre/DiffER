@@ -99,7 +99,7 @@ class ContinuousDiffuser(nn.Module):
         input_token_ids = F.one_hot(input_token_ids, len(self.tokeniser))
         input_pad_mask = torch.tensor(input_mask, dtype=torch.bool).transpose(0, 1)
 
-        input_token_ids = input_token_ids[..., :self.max_seq_len]
+        input_token_ids = input_token_ids[:, :self.max_seq_len]
         input_pad_mask = input_pad_mask[:self.max_seq_len]
 
         if noised:
@@ -187,11 +187,10 @@ class ContinuousDiffuser(nn.Module):
             
         true_lengths = self.get_lengths_from_padding(batch['target_mask'])
         if pred_lengths:
+            lengths = predicted_lengths.max(dim=-1)[1]
             if self.pad_limit == -1:
                 lengths[:] = self.max_seq_len
             else:
-                # lengths = torch.multinomial(torch.exp(predicted_lengths), num_samples=1).squeeze()
-                lengths = predicted_lengths.max(dim=-1)[1]
                 # leverage that change in length will be less than half the size of the product, use large indices for negative change
                 lengths[lengths > self.max_seq_len / 2] = lengths[lengths > self.max_seq_len / 2] - self.max_seq_len
                 lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + lengths

@@ -230,11 +230,10 @@ class DiscreteDiffuser(nn.Module):
             
         true_lengths = self.get_lengths_from_padding(batch['target_mask'])
         if pred_lengths:
+            lengths = predicted_lengths.max(dim=-1)[1]
             if self.pad_limit == -1:
                 lengths[:] = self.max_seq_len
             else:
-                # lengths = torch.multinomial(torch.exp(predicted_lengths), num_samples=1).squeeze()
-                lengths = predicted_lengths.max(dim=-1)[1]
                 # leverage that change in length will be less than half the size of the product, use large indices for negative change
                 lengths[lengths > self.max_seq_len / 2] = lengths[lengths > self.max_seq_len / 2] - self.max_seq_len
                 lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + lengths
