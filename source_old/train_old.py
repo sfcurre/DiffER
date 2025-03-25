@@ -4,11 +4,15 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from source.data import RSmilesUspto50
-from source.tokeniser import load_tokeniser_from_rsmiles
-from source.conditional_model import ConditionalModel
-from source.discrete_diffusion import UnifiedDiscreteDiffusion
-from source.trainer import UnifiedTrainer
+from .data import RSmilesUspto50
+from .tokeniser import load_tokeniser_from_rsmiles
+from .discrete_diffuser import DiscreteDiffuser
+from .continuous_diffuser import ContinuousDiffuser
+from .rate_models import RATE_MODELS
+from .conditional_model import ConditionalModel
+from .diffuseq_model import DiffuseqModel
+from .conditional_model_legacy import ConditionalModelLegacy
+from .trainer import DiffusionModelTrainer
 
 USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
@@ -36,15 +40,38 @@ def main(name, config, load):
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // config['training']['gpus']
     
+    if config['model']['continuous']:
+        config['model']['S'] = len(tokeniser)
+        diffuser = ContinuousDiffuser(tokeniser,
+                                      forward_pred=forward_pred,
+                                      num_timesteps=config['model']['num_timesteps'],
+                                      max_seq_len=config['model']['max_seq_len'],
+                                      rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
+                                      min_time=config['model']['min_time'],
+                                      pad_limit=config['model']['pad_limit'])
+    else:
+        diffuser = DiscreteDiffuser(tokeniser,
+                                    forward_pred=forward_pred,
+                                    num_timesteps=config['model']['num_timesteps'],
+                                    max_seq_len=config['model']['max_seq_len'],
+                                    beta_schedule=config['model']['beta_schedule'],
+                                    pad_limit=config['model']['pad_limit'])
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred, randomize_padding=config['model']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
+        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
-                                        num_workers=num_workers)
+                                        num_workers=num_workers,
+                                        collate_fn=diffuser)
     print("Finished datasets.")
 
-    model = ConditionalModel(
+    model_class = ConditionalModel
+    if config['model']['diffuseq']:
+        model_class = DiffuseqModel
+    if config['model']['legacy']:
+        model_class = ConditionalModelLegacy
+    
+    model = model_class(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
         d_model=config['model']['d_model'],
@@ -64,13 +91,8 @@ def main(name, config, load):
                            lr=config['training']['learning_rate'],
                            weight_decay=config['training']['weight_decay'])
     
-    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * ~config['model']['continuous'],
-                                        num_classes=len(tokeniser),
-                                        noise_schedule_type=config['model']['noise_schedule'],
-                                        noise_schedule=config['model']['noise_schedule_args'],
-                                        )
-    
-    trainer = UnifiedTrainer(model, optimizer, diffuser, name, length_loss=config['model']['length_loss'], use_gpu=use_gpu)
+    trainer = DiffusionModelTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
+                                    length_loss=config['model']['length_loss'], use_gpu=use_gpu)
 
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
@@ -78,6 +100,7 @@ def main(name, config, load):
     print(f'Training {name} with heuristics...')
     trainer.train(dataloaders,
                   config['training']['epochs'],
+                  config['training']['patience'],
                   val_limit=10)
     
 #========================================================================

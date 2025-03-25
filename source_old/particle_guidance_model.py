@@ -14,11 +14,11 @@ This code is heavily inspired by Chemformer (https://github.com/MolecularAI/Chem
 and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/tree/main)
 '''
 
-class GuidanceModel(nn.Module):
+class ParticleGuidanceModel(nn.Module):
     def __init__(self,
         conditional_model,
         ):
-        super(GuidanceModel, self).__init__()
+        super(ParticleGuidanceModel, self).__init__()
 
         self.tokeniser = conditional_model.tokeniser
         self.max_seq_len = conditional_model.max_seq_len
@@ -38,32 +38,31 @@ class GuidanceModel(nn.Module):
         self._init_params()
         self.register_buffer("pos_emb", self.positional_embs())
 
-        self.memory = {}
-
         RDLogger.DisableLog("rdApp.*")
 
     def forward(self, encoder_input, encoder_pad_mask):
-        encoder_embs = self.embed_onehot(encoder_input)
-        batch, _, _ = tuple(encoder_embs.size())
+        encoder_embs = self.embed_log_probs(encoder_input)
         
-        len_tokens = self.length_rep(torch.zeros(batch, 1, dtype=torch.int32, device=encoder_embs.device))
-        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=1)
+        len_tokens = self.length_rep(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32, device=encoder_embs.device))
+        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
 
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
         model_output = model_output.mean(dim=1)
 
-        output = self.output_fc(model_output)
+        distance = model_output.unsqueeze(1) - model_output.unsqueeze(0)
+        output = self.output_fc(distance)
 
         return output
-    
-    def embed_onehot(self, onehot_input, t=None):
-        _, seq_len, _ = tuple(onehot_input.size())
 
+    def embed_log_probs(self, log_probs, t=None):
+        seq_len, _, _ = tuple(log_probs.size())
+
+        onehot_input = torch.exp(log_probs)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
-        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0)
+        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
         onehot_embs = onehot_embs + positional_embs
         if t is not None:
             time_embs = self.time_emb(t)
@@ -78,16 +77,15 @@ class GuidanceModel(nn.Module):
         sampled_mols = list(map(canonicalize, (m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols)))
         return sampled_mols
         
-    def get_memory_scores(self, sampled_mols):
+    def get_distance_scores(self, sampled_mols):
         scores = []
-        for m in sampled_mols:
-            if m in self.memory:
-                self.memory[m] += 1
-                scores.append(0)
-            else:
-                if m is not None:
-                    self.memory[m] = 1
-                scores.append(1)
+        for m1 in sampled_mols:
+            scores.append([])
+            for m2 in sampled_mols:
+                if m1 == m2:
+                    scores[-1].append(0)
+                else:
+                    scores[-1].append(1)
         return torch.tensor(scores)
 
     def get_valid_scores(self, sampled_mols):
@@ -101,24 +99,9 @@ class GuidanceModel(nn.Module):
     
     def get_scores(self, tgt_tokens):
         sampled_mols = self.get_canonical(tgt_tokens)
-        valid_scores = []
-        memory_scores = []
-        for m in sampled_mols:
-            if m in self.memory:
-                self.memory[m] += 1
-                memory_scores.append(0)
-                valid_scores.append(1)
-            else:
-                if m is not None:
-                    self.memory[m] = 1
-                    valid_scores.append(1)
-                else:
-                    valid_scores.append(0)
-                memory_scores.append(1)
-                
-        valid_scores = torch.tensor(valid_scores)
-        memory_scores = torch.tensor(memory_scores)
-        return valid_scores, memory_scores
+        valid_scores = self.get_valid_scores(sampled_mols)
+        distance_scores = self.get_distance_scores(sampled_mols)
+        return valid_scores, distance_scores
     
     def get_loss(self, output, scores):
         classifier_loss = F.binary_cross_entropy_with_logits(output, scores)

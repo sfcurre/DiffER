@@ -240,16 +240,15 @@ class DiscreteDiffuser(nn.Module):
         else:
             lengths = true_lengths
 
+        if num_samples > 1:
+            lengths = lengths.repeat(num_samples)
+            memory = memory.repeat(num_samples, 1, 1)
+            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
+
         tgt_tokens, length_mask = self.init_noise(lengths)
     
         if verbose:
             print(f'target: {batch["target_smiles"][0]}')
-
-        if num_samples > 1:
-            tgt_tokens = tgt_tokens.repeat(1, num_samples, 1)
-            length_mask = length_mask.repeat(num_samples, 1)
-            memory = memory.repeat(num_samples, 1, 1)
-            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
 
         for t in reversed(range(1, self.num_timesteps)):
             # My code likes (time, batch, tokens)

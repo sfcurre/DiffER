@@ -5,15 +5,11 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
-from source.discrete_diffuser import DiscreteDiffuser
-from source.continuous_diffuser import ContinuousDiffuser
-from source.rate_models import RATE_MODELS
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
-from source.diffuseq_model import DiffuseqModel
-from source.conditional_model_legacy import ConditionalModelLegacy
-from source.conditional_model_attn_eval import ConditionalModelAttnEval
-from source.trainer import DiffusionModelTrainer
+from source.discrete_diffusion import UnifiedDiscreteDiffusion
+from source.trainer import UnifiedTrainer
+from source.sampler import UnifiedSampler
 from source.utils import move_batch_to_gpu
 
 import json
@@ -46,41 +42,20 @@ def main(name, config, load, num_samples, test, pred_lengths):
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // config['training']['gpus']
     
-    if config['model']['continuous']:
-        config['model']['S'] = len(tokeniser)
-        diffuser = ContinuousDiffuser(tokeniser,
-                                      forward_pred=forward_pred,
-                                      num_timesteps=config['model']['num_timesteps'],
-                                      max_seq_len=config['model']['max_seq_len'],
-                                      rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
-                                      min_time=config['model']['min_time'],
-                                      pad_limit=config['model']['pad_limit'])
-    else:
-        diffuser = DiscreteDiffuser(tokeniser,
-                                    forward_pred=forward_pred,
-                                    num_timesteps=config['model']['num_timesteps'],
-                                    max_seq_len=config['model']['max_seq_len'],
-                                    beta_schedule=config['model']['beta_schedule'],
-                                    pad_limit=config['model']['pad_limit'])
+    print("Reading datasets...")
+    dataloaders = {}
+    num_available_cpus = len(os.sched_getaffinity(0))
+    num_workers = num_available_cpus // config['training']['gpus']
+    
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred)
+        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred, randomize_padding=config['model']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
-                                        num_workers=num_workers,
-                                        collate_fn=diffuser)
+                                        num_workers=num_workers)
     print("Finished datasets.")
 
-    model_class = ConditionalModel
-    if config['model']['diffuseq']:
-        model_class = DiffuseqModel
-    if config['model']['legacy']:
-        model_class = ConditionalModelLegacy
-    
-    if args.record_attns:
-        model_class = ConditionalModelAttnEval
-    
-    model = model_class(
+    model = ConditionalModel(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
         d_model=config['model']['d_model'],
@@ -100,8 +75,17 @@ def main(name, config, load, num_samples, test, pred_lengths):
                            lr=config['training']['learning_rate'],
                            weight_decay=config['training']['weight_decay'])
     
-    trainer = DiffusionModelTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
-                                    length_loss=config['model']['length_loss'], use_gpu=use_gpu)
+    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * ~config['model']['continuous'],
+                                        num_classes=len(tokeniser),
+                                        noise_schedule_type=config['model']['noise_schedule'],
+                                        noise_schedule=config['model']['noise_schedule_args'],
+                                        )
+
+    trainer = UnifiedTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
+                             length_loss=config['model']['length_loss'], use_gpu=use_gpu)
+    
+    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01)
+
     
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
@@ -110,6 +94,7 @@ def main(name, config, load, num_samples, test, pred_lengths):
     #     os.mkdir(f'out/samples/{name}/')
 
     print(f'Evaluating {name}...')
+    model.eval()
   
     torch.manual_seed(1998) 
     with torch.no_grad():
@@ -121,18 +106,18 @@ def main(name, config, load, num_samples, test, pred_lengths):
     for i, batch in enumerate(dataloaders[DATASET]):
         
         targets = {}
-        for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
+        for target, source in zip(batch['decoder_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
         
         if use_gpu:
             move_batch_to_gpu(batch)
 
-        sampled_mols, _ = diffuser.sample(batch,
-                                            model,
-                                            verbose=False,
-                                            pred_lengths=pred_lengths,
-                                            clean=False,
-                                            num_samples=num_samples)
+        sampled_mols, _ = sampler.sample(batch,
+                                          model,
+                                          verbose=False,
+                                          pred_lengths=pred_lengths,
+                                          clean=False,
+                                          num_samples=num_samples)
         for j, smi in enumerate(sampled_mols):
             targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
@@ -145,7 +130,7 @@ def main(name, config, load, num_samples, test, pred_lengths):
                                                                    record_attns=True)
             for j, smi in enumerate(sampled_mols):
                 attns[batch['encoder_smiles'][j]] = smi_data = {}
-                smi_data['target'] = batch['target_smiles'][j]
+                smi_data['target'] = batch['decoder_smiles'][j]
                 smi_data['sample'] = smi
                 smi_data['in_attns'] = {k: v[:, i] for k, v in in_attns.items()}
                 smi_data['out_attns'] = {t: {k: v[:, i] for k, v in out_t} for t, out_t in out_attns}

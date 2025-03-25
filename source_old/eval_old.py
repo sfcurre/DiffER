@@ -4,17 +4,17 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from source.data import RSmilesUspto50
-from source.RL_diffuser import RLDiffuser
-from source.rate_models import RATE_MODELS
-from source.tokeniser import load_tokeniser_from_rsmiles
-from source.conditional_model import ConditionalModel
-from source.diffuseq_model import DiffuseqModel
-from source.conditional_model_legacy import ConditionalModelLegacy
-from source.conditional_model_attn_eval import ConditionalModelAttnEval
-from source.guidance_model import GuidanceModel
-from source.particle_guidance_model import ParticleGuidanceModel
-from source.utils import move_batch_to_gpu, canonicalize
+from .data import RSmilesUspto50
+from .discrete_diffuser import DiscreteDiffuser
+from .continuous_diffuser import ContinuousDiffuser
+from .rate_models import RATE_MODELS
+from .tokeniser import load_tokeniser_from_rsmiles
+from .conditional_model import ConditionalModel
+from .diffuseq_model import DiffuseqModel
+from .conditional_model_legacy import ConditionalModelLegacy
+from .conditional_model_attn_eval import ConditionalModelAttnEval
+from .trainer import DiffusionModelTrainer
+from .utils import move_batch_to_gpu
 
 import json
 
@@ -46,20 +46,27 @@ def main(name, config, load, num_samples, test, pred_lengths):
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // config['training']['gpus']
     
-    config['model']['S'] = len(tokeniser)
-    diffuser = RLDiffuser(tokeniser,
-                          forward_pred=forward_pred,
-                          num_timesteps=config['model']['num_timesteps'],
-                          max_seq_len=config['model']['max_seq_len'],
-                          rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
-                          min_time=config['model']['min_time'],
-                          pad_limit=config['model']['pad_limit'])
-
+    if config['model']['continuous']:
+        config['model']['S'] = len(tokeniser)
+        diffuser = ContinuousDiffuser(tokeniser,
+                                      forward_pred=forward_pred,
+                                      num_timesteps=config['model']['num_timesteps'],
+                                      max_seq_len=config['model']['max_seq_len'],
+                                      rate_model=RATE_MODELS[config['model']['rate_model']](config, 'cpu'),
+                                      min_time=config['model']['min_time'],
+                                      pad_limit=config['model']['pad_limit'])
+    else:
+        diffuser = DiscreteDiffuser(tokeniser,
+                                    forward_pred=forward_pred,
+                                    num_timesteps=config['model']['num_timesteps'],
+                                    max_seq_len=config['model']['max_seq_len'],
+                                    beta_schedule=config['model']['beta_schedule'],
+                                    pad_limit=config['model']['pad_limit'])
     for split in ['train', 'val', 'test']:
         dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred)
         dataloaders[split] = DataLoader(dataset,
-                                        batch_size=20,
-                                        shuffle=False,
+                                        batch_size=config['training']['batch_size'],
+                                        shuffle=True,
                                         num_workers=num_workers,
                                         collate_fn=diffuser)
     print("Finished datasets.")
@@ -88,11 +95,26 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
     if use_gpu:
         model = model.cuda()
-
+ 
+    optimizer = optim.Adam(model.parameters(),
+                           lr=config['training']['learning_rate'],
+                           weight_decay=config['training']['weight_decay'])
+    
+    trainer = DiffusionModelTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
+                                    length_loss=config['model']['length_loss'], use_gpu=use_gpu)
+    
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
 
+    # if not os.path.exists(f'out/samples/{name}/'):
+    #     os.mkdir(f'out/samples/{name}/')
+
     print(f'Evaluating {name}...')
+    model.eval()
+  
+    torch.manual_seed(1998) 
+    with torch.no_grad():
+        trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
 
     torch.manual_seed(1998) 
     all_targets = {}
@@ -100,45 +122,28 @@ def main(name, config, load, num_samples, test, pred_lengths):
     for i, batch in enumerate(dataloaders[DATASET]):
         
         targets = {}
-        canonicals = []
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
-            canonicals.append(canonicalize(source))
-
-        assert len(set(canonicals)) == 1, "All source molecules in a batch must be the same."
         
-        if args.particle_guidance:
-            guidance = ParticleGuidanceModel(model)
-        else:
-            guidance = GuidanceModel(model)
-        optimizer = optim.Adam(guidance.parameters(),
-                               lr=config['training']['learning_rate'],
-                               weight_decay=config['training']['weight_decay'])
-
         if use_gpu:
-            guidance = guidance.cuda()
-            move_batch_to_gpu(batch)    
-    
+            move_batch_to_gpu(batch)
+
         sampled_mols, _ = diffuser.sample(batch,
                                             model,
-                                            guidance,
-                                            optimizer,
-                                            gamma=args.gamma,
                                             verbose=False,
                                             pred_lengths=pred_lengths,
-                                            clean=False)
+                                            clean=False,
+                                            num_samples=num_samples)
         for j, smi in enumerate(sampled_mols):
             targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
         if i < args.record_attns:
             sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,
                                                                    model,
-                                                                   guidance,
-                                                                   optimizer,
-                                                                   gamma=args.gamma,
                                                                    verbose=False,
                                                                    pred_lengths=pred_lengths,
-                                                                   clean=False)
+                                                                   clean=False,
+                                                                   record_attns=True)
             for j, smi in enumerate(sampled_mols):
                 attns[batch['encoder_smiles'][j]] = smi_data = {}
                 smi_data['target'] = batch['target_smiles'][j]
@@ -154,11 +159,11 @@ def main(name, config, load, num_samples, test, pred_lengths):
             else:
                 all_targets[source] = targets[source]
         
-        with open(f"out/samples/{name}_samples.json", 'w') as fp:
-            json.dump(all_targets, fp)
+    with open(f"out/samples/{name}_samples.json", 'w') as fp:
+        json.dump(all_targets, fp)
 
-        if args.record_attns:
-            torch.save(attns, f"out/samples/attns/{name}_attns.json")
+    if args.record_attns:
+        torch.save(attns, f"out/samples/attns/{name}_attns.json")
 
     print('Evaluation complete.')
 
@@ -172,8 +177,6 @@ if __name__ == '__main__':
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
-    parser.add_argument("--gamma", type=float, default=0.5)
-    parser.add_argument("--particle_guidance", action='store_true')
     args = parser.parse_args()
 
     config_file = args.config_path

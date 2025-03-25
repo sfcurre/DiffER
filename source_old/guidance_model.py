@@ -43,11 +43,10 @@ class GuidanceModel(nn.Module):
         RDLogger.DisableLog("rdApp.*")
 
     def forward(self, encoder_input, encoder_pad_mask):
-        encoder_embs = self.embed_onehot(encoder_input)
-        batch, _, _ = tuple(encoder_embs.size())
+        encoder_embs = self.embed_log_probs(encoder_input)
         
-        len_tokens = self.length_rep(torch.zeros(batch, 1, dtype=torch.int32, device=encoder_embs.device))
-        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=1)
+        len_tokens = self.length_rep(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32, device=encoder_embs.device))
+        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
 
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
@@ -56,14 +55,15 @@ class GuidanceModel(nn.Module):
         output = self.output_fc(model_output)
 
         return output
-    
-    def embed_onehot(self, onehot_input, t=None):
-        _, seq_len, _ = tuple(onehot_input.size())
 
+    def embed_log_probs(self, log_probs, t=None):
+        seq_len, _, _ = tuple(log_probs.size())
+
+        onehot_input = torch.exp(log_probs)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
-        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0)
+        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
         onehot_embs = onehot_embs + positional_embs
         if t is not None:
             time_embs = self.time_emb(t)

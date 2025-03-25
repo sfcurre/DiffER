@@ -197,6 +197,11 @@ class ContinuousDiffuser(nn.Module):
         else:
             lengths = true_lengths
 
+        if num_samples > 1:
+            lengths = lengths.repeat(num_samples)
+            memory = memory.repeat(num_samples, 1, 1)
+            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
+
         tgt_tokens, length_mask = self.init_noise(lengths)
     
         if verbose:
@@ -205,12 +210,6 @@ class ContinuousDiffuser(nn.Module):
         if record_attns:
             in_attns = model.get_attn('encoder')
             out_attns = {}
-
-        if num_samples > 1:
-            tgt_tokens = tgt_tokens.repeat(1, num_samples, 1)
-            length_mask = length_mask.repeat(num_samples, 1)
-            memory = memory.repeat(num_samples, 1, 1)
-            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
 
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = tgt_tokens.device

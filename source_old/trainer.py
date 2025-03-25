@@ -15,21 +15,25 @@ from .utils import move_batch_to_gpu
 This code is inspired by https://github.com/ehoogeboom/multinomial_diffusion/tree/main
 '''
 
-class UnifiedTrainer:
-    def __init__(self, model, optimizer, diffuser, name='Default', length_loss = 'cross_entropy', use_gpu=True):
+class DiffusionModelTrainer:
+    def __init__(self, model, optimizer, diffuser, name='Default', loss_components=['nll'], length_loss = 'cross_entropy', use_gpu=True):
         self.model = model
         self.optimizer = optimizer
         self.diffuser = diffuser
         self.name = name
+        self.loss = loss_components
         self.length_loss = length_loss
         self.use_gpu = use_gpu
         
         RDLogger.DisableLog("rdApp.*")
 
-    def train(self, dataloaders, epochs, val_limit=100, pred_lengths=True):
+    def train(self, dataloaders, epochs, patience, val_limit=100, pred_lengths=True):
         # Train model
         t_total = time.time()
         loss_values = []
+        bad_counter = 0
+        best = epochs + 1
+        best_epoch = 0
         for epoch in range(epochs):
             print(f'Epoch {epoch} - {time.time() - t_total}')
             epoch_losses = []
@@ -39,10 +43,32 @@ class UnifiedTrainer:
             with torch.no_grad():
                 self.print_metrics(dataloaders['val'], str(epoch) + f'.{i+1} - {time.time() - t_total}',
                                    val_limit, pred_lengths=pred_lengths)
-
+            # torch.save(self.model.state_dict(), 'out/models/{}_{}.pkl'.format(self.name, epoch))
             torch.save(self.model.state_dict(), 'out/models/{}.pkl'.format(self.name))
             loss_values.append(np.mean(epoch_losses))
             np.save(f'out/losses/{self.name}_losses.npy', np.array(loss_values))
+
+            # if loss_values[-1] < best:
+            #     best = loss_values[-1]
+            #     best_epoch = epoch
+            #     bad_counter = 0
+            # else:
+            #     bad_counter += 1
+
+            # if bad_counter == patience:
+            #     break
+
+            # files = glob.glob(f'out/models/{self.name}_*.pkl')
+            # for file in files:
+            #     epoch_nb = int(file.split('_')[-1].split('.')[0])
+            #     if epoch_nb < best_epoch:
+            #         os.remove(file)
+
+        # files = glob.glob(f'out/models/{self.name}_*.pkl')
+        # for file in files:
+        #     epoch_nb = int(file.split('_')[-1].split('.')[0])
+        #     if epoch_nb > best_epoch:
+        #         os.remove(file)
 
         print("Optimization Finished!")
         print("Total time elapsed: {:.4f}s".format(time.time() - t_total))
@@ -72,9 +98,9 @@ class UnifiedTrainer:
         log = f'Epoch - {epoch} | ' + ' | '.join(f'{key} - {sum(l) / len(l)}' for key, l in metrics.items())
         with open(f'out/metrics/{self.name}_metrics_log.txt', 'a') as fp:
             print(log + '\n', file=fp)
-
-    def sample_time(self, size):
-        return torch.rand((size,)) * (1.0 - self.min_time) + self.min_time
+ 
+        # with open(f'out/samples/{self.name}/sampled_mols_e{epoch.split()[0]}.json', 'w') as fp:
+        #     json.dump(mols, fp)
         
     def train_step(self, batch):
         if self.use_gpu:
@@ -83,9 +109,6 @@ class UnifiedTrainer:
         self.model.train()
         self.optimizer.zero_grad()
         
-        batch['t'] = self.sample_time(size=len(batch['x_0']))
-        batch['x_t'] = self.diffuser.qt_0_sample(batch['x_0'], batch['t'])
-
         output, lengths = self.model.forward(batch)
         loss = self._calc_loss(batch, output)['loss']
         total_loss = loss + self._calc_length_loss(batch, lengths)
@@ -105,7 +128,7 @@ class UnifiedTrainer:
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
-        sampled_smiles, _ = self.diffuser.sample(batch, self.model, verbose=True, pred_lengths=pred_lengths)
+        sampled_smiles, lprobs = self.diffuser.sample(batch, self.model, verbose=True, pred_lengths=pred_lengths)
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),
@@ -117,30 +140,67 @@ class UnifiedTrainer:
 
         return metrics, sampled_smiles
 
-    def _calc_loss(self, batch, x_logits):
-        loss = self.diffuser.compute_loss( 
-                     x_logits,
-                     batch['x_t'], 
-                     batch['x_0'], 
-                     batch['t'], 
-                     m=None, 
-                     coeff_ce=1.,
-                     coeff_vlb=1., 
-                     conditional_mask=None,
-                     simplified_vlb=False)
-        return loss
+    def _calc_loss(self, batch_input, token_output):
+        tokens = batch_input["target"]
+        # pad_mask = batch_input["target_mask"]
+        x_start = batch_input["target_onehots"]
+        t = batch_input['decoder_t']
+
+        loss_terms = {}    
+        
+        if 'nll' in self.loss or 'vb' in self.loss:
+            lprobs = F.log_softmax(token_output, dim=-1)
+            non_pad_mask = tokens.ne(self.diffuser.pad_token_idx)
+            nll_loss = -lprobs.gather(dim=-1, index=tokens[..., None])
+            nll_loss = nll_loss.squeeze() * non_pad_mask
+            nll_loss = nll_loss.sum(dim=0)
+            loss_terms['nll'] = nll_loss.mean()
+
+        if 'mse' in self.loss:
+            probs = F.softmax(token_output, dim=-1)
+            mse_loss = (x_start - probs) ** 2
+            mse_loss = mse_loss.sum(dim=(0, 2))
+            loss_terms['mse'] = mse_loss.mean()
+
+        if 'kl' in self.loss or 'vb' in self.loss or self.diffuser.update_Lt:
+            log_x_t = batch_input['decoder_input'].permute((1, 2, 0))
+            log_true_prob = self.diffuser.q_posterior(torch.log_softmax(x_start, dim=-1).permute((1, 2, 0)), log_x_t, t)
+            log_model_prob = self.diffuser.q_posterior(torch.log_softmax(token_output, dim=-1).permute((1, 2, 0)), log_x_t, t)
+            kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob))
+            kl = kl.sum(dim=(1, 2))
+            if self.diffuser.update_Lt:
+                self.diffuser._update_Lt(t, kl)
+            loss_terms['kl'] = kl.mean()
+
+        if 'vb' in self.loss:
+            mask = (t == torch.zeros_like(t)).float()
+            vb_loss = mask * nll_loss + (1. - mask) * kl
+            loss_terms['vb'] = vb_loss.mean()
+
+        if 'elbo' in self.loss:
+            elbo = self.diffuser.calc_elbo(t, token_output, batch_input['decoder_input'], x_start)
+            loss_terms['elbo'] = elbo.mean()
+
+        loss_terms['loss'] = sum(loss_terms[term] for term in loss_terms)
+
+        return loss_terms
     
     def _calc_length_loss(self, batch_input, pred_lengths):
         pad_mask = batch_input['target_mask']
         input_length = len(batch_input['encoder_pad_mask']) - batch_input['encoder_pad_mask'].sum(0).unsqueeze(-1)
         length_target = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
-        # leverage the fact that the change in length will be small, so large indices can be used for negative length change
-        length_target = (length_target - input_length) % self.diffuser.max_seq_len
+        length_target = length_target - input_length
         if self.length_loss == 'cross_entropy':
-            length_loss = -pred_lengths.gather(dim=-1, index=length_target)
+            # leverage the fact that the change in length is likely to be small, so large indices can be used for negative length change
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target % self.diffuser.max_seq_len)
+        elif self.length_loss == 'weighted_sum':
+            length_dist = torch.exp(pred_lengths)
+            length_indices = torch.arange(0, length_dist.shape[-1], device='cuda').repeat(len(length_target), 1)
+            index_errors = (length_indices - length_target) ** 2
+            length_loss = (length_dist * index_errors).sum(1)
         elif self.length_loss == 'focal':
             gamma = 0.25
-            length_loss = -pred_lengths.gather(dim=-1, index=length_target)
+            length_loss = -pred_lengths.gather(dim=-1, index=length_target % self.diffuser.max_seq_len)
             length_dist = torch.exp(-length_loss)
             focal_mod = (1 - length_dist) ** gamma
             length_loss *= focal_mod

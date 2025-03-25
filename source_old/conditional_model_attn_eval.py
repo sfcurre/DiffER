@@ -27,11 +27,11 @@ class ConditionalModelAttnEval(ConditionalModel):
     def patch_attention(self):
         for m in self.encoder.layers:
             self.patch_attention_layer(m.self_attn)
-            m.register_forward_hook(self.save_output_encoder)
+            m.register_forward_hook(self.save_output)
 
         for m in self.decoder.layers:
             self.patch_attention_layer(m.self_attn)
-            m.register_forward_hook(self.save_output_decoder)
+            m.register_forward_hook(self.save_output)
 
     def save_output_encoder(self, m, i, o):
         self.encoder_attn_outputs[m] = o

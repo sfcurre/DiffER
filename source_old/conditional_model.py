@@ -45,11 +45,11 @@ class ConditionalModel(nn.Module):
         self.length_map = nn.Linear(self.d_model, self.max_seq_len)
         
         enc_norm = nn.LayerNorm(d_model)
-        enc_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True, batch_first=True)
+        enc_layer = nn.TransformerEncoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True)
         self.encoder = nn.TransformerEncoder(enc_layer, num_layers, norm=enc_norm)
 
         dec_norm = nn.LayerNorm(d_model)
-        dec_layer = nn.TransformerDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True, batch_first=True)
+        dec_layer = nn.TransformerDecoderLayer(d_model, num_heads, d_feedforward, dropout, activation, norm_first=True)
         self.decoder = nn.TransformerDecoder(dec_layer, num_layers, norm=dec_norm)
 
         self.token_fc = nn.Linear(d_model, vocab_size)
@@ -82,17 +82,26 @@ class ConditionalModel(nn.Module):
         return encs
 
     def forward(self, batch):
-        memory, memory_pad_mask, predicted_lengths = self.encode(batch['y_0'], batch['y_mask'])
-        token_output = self.decode(batch['x_t'], batch['x_mask'], memory, memory_pad_mask, batch['t'])
+        encoder_input = batch["encoder_input"]
+        encoder_pad_mask = batch["encoder_pad_mask"].transpose(0, 1)
+        
+        memory, memory_pad_mask, predicted_lengths = self.encode(encoder_input, encoder_pad_mask)
+        
+        decoder_input = batch["decoder_input"]
+        decoder_pad_mask = batch["decoder_pad_mask"].transpose(0, 1)
+        t = batch["decoder_t"]
+        
+        token_output = self.decode(decoder_input, decoder_pad_mask, memory, memory_pad_mask, t)
         return token_output, predicted_lengths
 
-    def embed_onehot(self, onehot_input, t=None):
-        _, seq_len, _ = tuple(onehot_input.size())
+    def embed_log_onehot(self, log_onehot_input, t=None):
+        seq_len, _, _ = tuple(log_onehot_input.size())
 
+        onehot_input = torch.exp(log_onehot_input)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
-        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0)
+        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0).transpose(0, 1)
         onehot_embs = onehot_embs + positional_embs
         if t is not None:
             time_embs = self.time_emb(t)
@@ -101,25 +110,29 @@ class ConditionalModel(nn.Module):
         return onehot_embs
 
     def encode(self, encoder_input, encoder_pad_mask):
-        encoder_embs = self.embed_onehot(encoder_input)
-        batch, _, _ = tuple(encoder_embs.size())
+        encoder_embs = self.embed_log_onehot(encoder_input)
         
-        len_tokens = self.length_rep(torch.zeros(batch, 1, dtype=torch.int32, device=encoder_embs.device))
-        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=1)
+        len_tokens = self.length_rep(torch.zeros(1, encoder_embs.size(1), dtype=torch.int32, device=encoder_embs.device))
+        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=0)
         encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
 
         model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
 
-        predicted_lengths_logits = self.length_map(model_output[:, 0, :])
+        predicted_lengths_logits = self.length_map(model_output[0, :, :])
+        predicted_lengths = F.log_softmax(predicted_lengths_logits, dim=-1)
 
-        return model_output, encoder_pad_mask, predicted_lengths_logits
+        return model_output, encoder_pad_mask, predicted_lengths
 
     def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask, t):
-        decoder_embs = self.embed_onehot(decoder_input, t)
+        decoder_embs = self.embed_log_onehot(decoder_input, t)
+
+        seq_len, _, _ = tuple(decoder_embs.size())
+        tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool, device=decoder_embs.device)
 
         model_output = self.decoder(decoder_embs, memory,
             tgt_key_padding_mask=decoder_pad_mask,
             memory_key_padding_mask=memory_pad_mask,
+            tgt_mask=tgt_mask
         )
         token_output = self.token_fc(model_output)
         return token_output
