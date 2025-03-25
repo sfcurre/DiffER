@@ -16,13 +16,15 @@ This code is inspired by https://github.com/ehoogeboom/multinomial_diffusion/tre
 '''
 
 class UnifiedTrainer:
-    def __init__(self, model, optimizer, diffuser, name='Default', length_loss = 'cross_entropy', use_gpu=True):
+    def __init__(self, model, optimizer, diffuser, sampler, name='Default', length_loss = 'cross_entropy', use_gpu=True, min_time=0.01):
         self.model = model
         self.optimizer = optimizer
         self.diffuser = diffuser
+        self.sampler = sampler
         self.name = name
         self.length_loss = length_loss
         self.use_gpu = use_gpu
+        self.min_time = min_time # TODO
         
         RDLogger.DisableLog("rdApp.*")
 
@@ -73,8 +75,8 @@ class UnifiedTrainer:
         with open(f'out/metrics/{self.name}_metrics_log.txt', 'a') as fp:
             print(log + '\n', file=fp)
 
-    def sample_time(self, size):
-        return torch.rand((size,)) * (1.0 - self.min_time) + self.min_time
+    def sample_time(self, size, device):
+        return torch.rand((size,), device=device) * (1.0 - self.min_time) + self.min_time
         
     def train_step(self, batch):
         if self.use_gpu:
@@ -83,7 +85,7 @@ class UnifiedTrainer:
         self.model.train()
         self.optimizer.zero_grad()
         
-        batch['t'] = self.sample_time(size=len(batch['x_0']))
+        batch['t'] = self.sample_time(size=len(batch['x_0']), device=batch['x_0'].device)
         batch['x_t'] = self.diffuser.qt_0_sample(batch['x_0'], batch['t'])
 
         output, lengths = self.model.forward(batch)
@@ -105,7 +107,7 @@ class UnifiedTrainer:
         token_acc = self._calc_token_acc(batch, output)
         perplexity = self._calc_perplexity(batch, output)
 
-        sampled_smiles, _ = self.diffuser.sample(batch, self.model, verbose=True, pred_lengths=pred_lengths)
+        sampled_smiles, _ = self.sampler.sample(batch, self.model, verbose=True, pred_lengths=pred_lengths)
         sampling_metrics = self._calc_sampling_metrics(batch, sampled_smiles)
 
         metrics = dict(val_loss=loss.cpu(),
@@ -120,8 +122,8 @@ class UnifiedTrainer:
     def _calc_loss(self, batch, x_logits):
         loss = self.diffuser.compute_loss( 
                      x_logits,
-                     batch['x_t'], 
-                     batch['x_0'], 
+                     batch['x_t'].max(dim=-1)[1], 
+                     batch['x_0'].max(dim=-1)[1],
                      batch['t'], 
                      m=None, 
                      coeff_ce=1.,
@@ -131,11 +133,11 @@ class UnifiedTrainer:
         return loss
     
     def _calc_length_loss(self, batch_input, pred_lengths):
-        pad_mask = batch_input['target_mask']
-        input_length = len(batch_input['encoder_pad_mask']) - batch_input['encoder_pad_mask'].sum(0).unsqueeze(-1)
-        length_target = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
+        pad_mask = batch_input['x_mask']
+        input_length = batch_input['y_mask'].shape[1] - batch_input['y_mask'].sum(1).unsqueeze(-1)
+        length_target = pad_mask.shape[1] - pad_mask.sum(1).unsqueeze(-1)
         # leverage the fact that the change in length will be small, so large indices can be used for negative length change
-        length_target = (length_target - input_length) % self.diffuser.max_seq_len
+        length_target = ((length_target - input_length) % self.sampler.max_seq_len).to(torch.int64)
         if self.length_loss == 'cross_entropy':
             length_loss = -pred_lengths.gather(dim=-1, index=length_target)
         elif self.length_loss == 'focal':
@@ -147,8 +149,8 @@ class UnifiedTrainer:
         return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):
-        token_ids = batch_input["target"]
-        target_mask = batch_input["target_mask"]
+        token_ids = batch_input["x_0"].max(dim=-1)[1]
+        target_mask = batch_input["x_mask"]
 
         target_mask = ~(target_mask > 0)
         _, pred_ids = torch.max(token_output.float(), dim=2)
@@ -162,8 +164,8 @@ class UnifiedTrainer:
         return accuracy
 
     def _calc_perplexity(self, batch_input, vocab_dist_output):
-        target_ids = batch_input["target"]
-        target_mask = batch_input["target_mask"]
+        target_ids = batch_input["x_0"].max(dim=-1)[1]
+        target_mask = batch_input["x_mask"]
 
         inv_target_mask = ~(target_mask > 0)
         log_probs = vocab_dist_output.gather(2, target_ids.unsqueeze(2)).squeeze(2)
@@ -176,7 +178,7 @@ class UnifiedTrainer:
         return perp.mean()
 
     def _calc_sampling_metrics(self, batch_input, sampled_smiles):
-        target_smiles = batch_input['target_smiles']
+        target_smiles = batch_input['decoder_smiles']
         mol_targets = [Chem.MolFromSmiles(smi) for smi in target_smiles]
         canon_targets = [Chem.MolToSmiles(mol) for mol in mol_targets]
         sampled_mols = [Chem.MolFromSmiles(smi) for smi in sampled_smiles]

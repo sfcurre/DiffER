@@ -9,6 +9,7 @@ from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.discrete_diffusion import UnifiedDiscreteDiffusion
 from source.trainer import UnifiedTrainer
+from source.sampler import UnifiedSampler
 
 USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
@@ -37,11 +38,12 @@ def main(name, config, load):
     num_workers = num_available_cpus // config['training']['gpus']
     
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred, randomize_padding=config['model']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
+        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
-                                        num_workers=num_workers)
+                                        num_workers=num_workers,
+                                        collate_fn=dataset.collate_fn)
     print("Finished datasets.")
 
     model = ConditionalModel(
@@ -64,13 +66,14 @@ def main(name, config, load):
                            lr=config['training']['learning_rate'],
                            weight_decay=config['training']['weight_decay'])
     
-    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * ~config['model']['continuous'],
+    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * (not config['model']['continuous']),
                                         num_classes=len(tokeniser),
                                         noise_schedule_type=config['model']['noise_schedule'],
-                                        noise_schedule=config['model']['noise_schedule_args'],
+                                        noise_schedule_args=config['model']['noise_schedule_args'],
                                         )
-    
-    trainer = UnifiedTrainer(model, optimizer, diffuser, name, length_loss=config['model']['length_loss'], use_gpu=use_gpu)
+    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01)
+
+    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], use_gpu=use_gpu)
 
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
@@ -94,9 +97,9 @@ if __name__ == '__main__':
     with open(config_file, 'r') as stream:
         config = yaml.load(stream, yaml.FullLoader)
 
-    if config['model']['pad_limit'] is None and args.pad_limit is not None:
-        config['model']['pad_limit'] = args.pad_limit
-    elif config['model']['pad_limit'] is None:
+    if config['data']['pad_limit'] is None and args.pad_limit is not None:
+        config['data']['pad_limit'] = args.pad_limit
+    elif config['data']['pad_limit'] is None:
         raise ValueError('Pad limit not specified in config or command line arguments.')
 
     main(args.name, config, args.load)

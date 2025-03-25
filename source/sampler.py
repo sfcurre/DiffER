@@ -85,10 +85,10 @@ class UnifiedSampler(nn.Module):
                 out_attns[idx + 1] = [m]
 
             s = ts[idx+1]
-            t_tensor = torch.full((length_mask.shape[0],), t, device=self.rate_model.device)
-            s_tensor = torch.full((length_mask.shape[0],), s, device=self.rate_model.device)            
+            t_tensor = torch.full((length_mask.shape[0],), t, device=device)
+            s_tensor = torch.full((length_mask.shape[0],), s, device=device)            
 
-            logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor.to(device))
+            logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
             fprob_t = F.softmax(logits, dim=2)
             x_t = x_t.max(dim=-1)
             

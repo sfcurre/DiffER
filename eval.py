@@ -48,11 +48,12 @@ def main(name, config, load, num_samples, test, pred_lengths):
     num_workers = num_available_cpus // config['training']['gpus']
     
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred, randomize_padding=config['model']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
+        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['model']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
-                                        num_workers=num_workers)
+                                        num_workers=num_workers,
+                                        collate_fn=dataset.collate_fn)
     print("Finished datasets.")
 
     model = ConditionalModel(
@@ -75,17 +76,17 @@ def main(name, config, load, num_samples, test, pred_lengths):
                            lr=config['training']['learning_rate'],
                            weight_decay=config['training']['weight_decay'])
     
-    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * ~config['model']['continuous'],
+    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * (not config['model']['continuous']),
                                         num_classes=len(tokeniser),
                                         noise_schedule_type=config['model']['noise_schedule'],
-                                        noise_schedule=config['model']['noise_schedule_args'],
+                                        noise_schedule_args=config['model']['noise_schedule_args'],
                                         )
 
-    trainer = UnifiedTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
+    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01)
+    
+    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, loss_components=config['model']['loss_terms'],
                              length_loss=config['model']['length_loss'], use_gpu=use_gpu)
     
-    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01)
-
     
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')

@@ -96,7 +96,7 @@ class ConditionalModel(nn.Module):
         onehot_embs = onehot_embs + positional_embs
         if t is not None:
             time_embs = self.time_emb(t)
-            onehot_embs += time_embs
+            onehot_embs += time_embs.unsqueeze(1)
         onehot_embs = self.dropout(onehot_embs)
         return onehot_embs
 
