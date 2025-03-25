@@ -4,15 +4,15 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from .data import RSmilesUspto50
-from .tokeniser import load_tokeniser_from_rsmiles
-from .discrete_diffuser import DiscreteDiffuser
-from .continuous_diffuser import ContinuousDiffuser
-from .rate_models import RATE_MODELS
-from .conditional_model import ConditionalModel
-from .diffuseq_model import DiffuseqModel
-from .conditional_model_legacy import ConditionalModelLegacy
-from .trainer import DiffusionModelTrainer
+from source_old.data import RSmilesUspto50
+from source_old.tokeniser import load_tokeniser_from_rsmiles
+from source_old.discrete_diffuser import DiscreteDiffuser
+from source_old.continuous_diffuser import ContinuousDiffuser
+from source_old.rate_models import RATE_MODELS
+from source_old.conditional_model import ConditionalModel
+from source_old.diffuseq_model import DiffuseqModel
+from source_old.conditional_model_legacy import ConditionalModelLegacy
+from source_old.trainer import DiffusionModelTrainer
 
 USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
