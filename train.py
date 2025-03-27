@@ -71,7 +71,7 @@ def main(name, config, load):
                                         noise_schedule_type=config['model']['noise_schedule'],
                                         noise_schedule_args=config['model']['noise_schedule_args'],
                                         )
-    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01)
+    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
 
     trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], use_gpu=use_gpu)
 

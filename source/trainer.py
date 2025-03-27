@@ -89,16 +89,20 @@ class UnifiedTrainer:
         batch['x_t'] = self.diffuser.qt_0_sample(batch['x_0'], batch['t'])
 
         output, lengths = self.model.forward(batch)
-        loss = self._calc_loss(batch, output)['loss']
-        total_loss = loss + self._calc_length_loss(batch, lengths)
+        total_loss = self._calc_loss(batch, output)['loss']
+        if self.sampler.pad_limit > -1:
+            total_loss += self._calc_length_loss(batch, lengths)
         total_loss.backward()
 
         self.optimizer.step()
-        return loss.cpu().item()
+        return total_loss.cpu().item()
 
     def val_step(self, batch, pred_lengths=True):
         if self.use_gpu:
             move_batch_to_gpu(batch)
+
+        batch['t'] = self.sample_time(size=len(batch['x_0']), device=batch['x_0'].device)
+        batch['x_t'] = self.diffuser.qt_0_sample(batch['x_0'], batch['t'])
 
         self.model.eval()
         output, lengths = self.model.forward(batch)
@@ -133,11 +137,11 @@ class UnifiedTrainer:
         return loss
     
     def _calc_length_loss(self, batch_input, pred_lengths):
-        pad_mask = batch_input['x_mask']
+        pred_lengths = F.log_softmax(pred_lengths)
         input_length = batch_input['y_mask'].shape[1] - batch_input['y_mask'].sum(1).unsqueeze(-1)
-        length_target = pad_mask.shape[1] - pad_mask.sum(1).unsqueeze(-1)
+        output_length = batch_input['x_mask'].shape[1] - batch_input['x_mask'].sum(1).unsqueeze(-1)
         # leverage the fact that the change in length will be small, so large indices can be used for negative length change
-        length_target = ((length_target - input_length) % self.sampler.max_seq_len).to(torch.int64)
+        length_target = ((output_length - input_length) % self.sampler.max_seq_len).to(torch.int64)
         if self.length_loss == 'cross_entropy':
             length_loss = -pred_lengths.gather(dim=-1, index=length_target)
         elif self.length_loss == 'focal':
@@ -178,7 +182,7 @@ class UnifiedTrainer:
         return perp.mean()
 
     def _calc_sampling_metrics(self, batch_input, sampled_smiles):
-        target_smiles = batch_input['decoder_smiles']
+        target_smiles = batch_input['target_smiles']
         mol_targets = [Chem.MolFromSmiles(smi) for smi in target_smiles]
         canon_targets = [Chem.MolToSmiles(mol) for mol in mol_targets]
         sampled_mols = [Chem.MolFromSmiles(smi) for smi in sampled_smiles]

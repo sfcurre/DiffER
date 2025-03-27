@@ -90,5 +90,6 @@ class RSmilesUspto50(torch.utils.data.Dataset):
             'x_0': x_0,
             'x_mask': x_mask,
             'encoder_smiles': encode_strs,
-            'decoder_smiles': decode_strs
+            'decoder_smiles': decode_strs,
+            'target_smiles': [s.rstrip(self.tokeniser.unk_token) for s in decode_strs]
         }
