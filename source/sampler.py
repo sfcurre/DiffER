@@ -97,8 +97,9 @@ class UnifiedSampler(nn.Module):
             prob_s = self.diffuser.ps_t_prob(fprob_t, x_t, t_tensor, s_tensor).type(torch.float)
             prob_s[s==0] = fprob_t[s==0]
 
-            x_t = sample_categorical(prob_s)
-            x_t = F.one_hot(x_t, len(self.tokeniser)).to(torch.float)
+            x_s = sample_categorical(prob_s)
+            x_s[batch['x_mask']] = x_t[batch['x_mask']]
+            x_t = F.one_hot(x_s, len(self.tokeniser)).to(torch.float)
 
             if verbose and (idx % 20 == 0):
                 ids = x_t.max(dim=-1)[1].cpu().numpy()

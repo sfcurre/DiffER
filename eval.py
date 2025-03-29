@@ -84,9 +84,7 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
     sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
     
-    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, loss_components=config['model']['loss_terms'],
-                             length_loss=config['model']['length_loss'], use_gpu=use_gpu)
-    
+    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu)    
     
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')

@@ -39,6 +39,12 @@ FineTuneSub=$((FineTune-1))
 # fi
 
 # if (($FineTune == 0)); then
+#     python train.py --name "BackwardDiffusionUnified_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous.yaml"  --pad_limit $PadLimit
+# else
+#     python train.py --name "BackwardDiffusionUnified_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardDiffusionUnified_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
+# fi
+
+# if (($FineTune == 0)); then
 #     python train.py --name "BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous_gaussian.yaml"  --pad_limit $PadLimit
 # else
 #     python train.py --name "BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous_gaussian.yaml" --load "out/models/BackwardDiffusionContGaussian_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit

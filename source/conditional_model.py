@@ -83,8 +83,8 @@ class ConditionalModel(nn.Module):
 
     def forward(self, batch):
         memory, memory_pad_mask, predicted_lengths = self.encode(batch['y_0'], batch['y_mask'])
-        token_output = self.decode(batch['x_t'], batch['x_mask'], memory, memory_pad_mask, batch['t'])
-        return token_output, predicted_lengths
+        logits = self.decode(batch['x_t'], batch['x_mask'], memory, memory_pad_mask, batch['t'])
+        return logits, predicted_lengths
 
     def embed_onehot(self, onehot_input, t=None):
         _, seq_len, _ = tuple(onehot_input.size())
@@ -117,12 +117,16 @@ class ConditionalModel(nn.Module):
     def decode(self, decoder_input, decoder_pad_mask, memory, memory_pad_mask, t):
         decoder_embs = self.embed_onehot(decoder_input, t)
 
+        _, seq_len, _ = tuple(decoder_embs.size())
+        tgt_mask = torch.zeros((seq_len, seq_len), dtype=torch.bool, device=decoder_embs.device)
+
         model_output = self.decoder(decoder_embs, memory,
             tgt_key_padding_mask=decoder_pad_mask,
             memory_key_padding_mask=memory_pad_mask,
+            tgt_mask=tgt_mask
         )
-        token_output = self.token_fc(model_output)
-        return token_output
+        logits = self.token_fc(model_output)
+        return logits
 
 class SinusoidalPosEmb(torch.nn.Module):
     def __init__(self, dim, rescale_steps=4000):

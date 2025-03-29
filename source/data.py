@@ -56,7 +56,7 @@ class RSmilesUspto50(torch.utils.data.Dataset):
         input_one_hots = one_hots[input_token_ids]
 
         input_one_hots = torch.tensor(input_one_hots[:, :self.max_seq_len], dtype=torch.float)
-        input_pad_mask = torch.tensor(input_pad_mask[:, :self.max_seq_len], dtype=torch.float)
+        input_pad_mask = torch.tensor(input_pad_mask[:, :self.max_seq_len], dtype=torch.bool)
 
         return input_one_hots, input_pad_mask
 

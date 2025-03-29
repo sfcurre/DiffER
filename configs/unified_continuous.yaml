@@ -15,6 +15,8 @@ model:
 
   # loss parameters
   length_loss: 'cross_entropy'
+  coeff_ce: 1.0
+  coeff_vlb: 1.0
 
   #diffusion parameters
   continuous: True

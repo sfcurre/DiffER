@@ -6,6 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .sampler import UnifiedSampler
+from .discrete_diffusion import *
+
 from rdkit import Chem, RDLogger
 
 '''
@@ -30,9 +32,9 @@ class RLSampler(UnifiedSampler):
             else:
                 # leverage that change in length will be less than half the size of the product, use large indices for negative change
                 lengths[lengths > self.max_seq_len / 2] = lengths[lengths > self.max_seq_len / 2] - self.max_seq_len
-                lengths = self.get_lengths_from_padding(batch['encoder_pad_mask']) + lengths
+                lengths = self.get_lengths_from_padding(batch['y_mask']) + lengths
         else:
-            lengths = self.get_lengths_from_padding(batch['target_mask'])
+            lengths = self.get_lengths_from_padding(batch['x_mask'])
 
         if num_samples > 1:
             lengths = lengths.repeat(num_samples)
@@ -50,21 +52,20 @@ class RLSampler(UnifiedSampler):
 
         ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
         device = x_t.device
-        D, B, S = x_t.shape
 
         for idx, t in enumerate(ts[0:-1]):
             if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 200]:
-                ids = x_t.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
+                ids = x_t.max(dim=-1)[1].cpu().numpy()
                 tokens = self.tokeniser.convert_ids_to_tokens(ids)
                 sampled_mols = self.tokeniser.detokenise(tokens)
                 m = sampled_mols[0]
                 out_attns[idx + 1] = [m]
 
             s = ts[idx+1]
-            t_tensor = torch.full((length_mask.shape[0],), t, device=self.rate_model.device)
-            s_tensor = torch.full((length_mask.shape[0],), s, device=self.rate_model.device)            
+            t_tensor = torch.full((length_mask.shape[0],), t, device=device)
+            s_tensor = torch.full((length_mask.shape[0],), s, device=device)            
 
-            logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor.to(device))
+            logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
 
             # Run guidance model on token_output
             ##############################
@@ -90,7 +91,7 @@ class RLSampler(UnifiedSampler):
 
             ##############################
             fprob_t = F.softmax(logits, dim=2)
-            x_t = x_t.max(dim=-1)
+            x_t = x_t.max(dim=-1)[1]
             
             prob_s = self.diffuser.ps_t_prob(fprob_t, x_t, t_tensor, s_tensor).type(torch.float)
             prob_s[s==0] = fprob_t[s==0]
@@ -99,11 +100,12 @@ class RLSampler(UnifiedSampler):
             diffusion_log_probs = torch.log(prob_s)
             guided_log_probs = (gamma * classifier_log_prob) + diffusion_log_probs
 
-            x_t = torch.multinomial(torch.exp(guided_log_probs))
-            x_t = F.one_hot(x_t, len(self.tokeniser))
-
+            x_s = sample_categorical(torch.exp(guided_log_probs))
+            x_s[batch['x_mask']] = x_t[batch['x_mask']]
+            x_t = F.one_hot(x_s, len(self.tokeniser)).to(torch.float)
+            
             if verbose and (idx <= 10 or idx == 50 or (idx) % 100 == 0):
-                ids = x_t.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
+                ids = x_t.max(dim=-1)[1].cpu().numpy()
                 tokens = self.tokeniser.convert_ids_to_tokens(ids)
                 sampled_mols = self.tokeniser.detokenise(tokens)
 
