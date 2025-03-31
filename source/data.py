@@ -28,7 +28,7 @@ class RSmilesUspto50(torch.utils.data.Dataset):
         output = self.transform(reactant, product)
         return output
 
-    def transform(self, product, reactant):
+    def transform(self, reactant, product):
         react_str, prod_str = reactant.replace(' ', ''), product.replace(' ', '')
         
         if self.forward:

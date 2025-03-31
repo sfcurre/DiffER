@@ -36,4 +36,8 @@ FineTuneSub=$((FineTune-1))
 
 # python eval.py --name "BackwardDiffusionContinuousAttn_PadLimit${PadLimit}-${FineTune}" --config_path "configs/pad_limit_spec_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 0 --record_attns
 
-python eval.py --name "BackwardDiffusionContinuous_NoPadLimit-${FineTune}" --config_path "configs/no_pad_limit_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_NoPadLimit-${FineTune}.pkl" --num_samples 1
+# python eval.py --name "BackwardDiffusionContinuous_NoPadLimit-${FineTune}" --config_path "configs/no_pad_limit_continuous.yaml" --load "out/models/BackwardDiffusionContinuous_NoPadLimit-${FineTune}.pkl" --num_samples 1
+
+# python eval.py --name "BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 1
+
+python eval.py --name "BackwardUnifiedContinuous_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_NoPadLimit-${FineTune}.pkl" --pad_limit -1 --num_samples 1

@@ -48,7 +48,7 @@ def main(name, config, load, num_samples, test, pred_lengths):
     num_workers = num_available_cpus // config['training']['gpus']
     
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['model']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
+        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
@@ -82,7 +82,7 @@ def main(name, config, load, num_samples, test, pred_lengths):
                                         noise_schedule_args=config['model']['noise_schedule_args'],
                                         )
 
-    sampler = UnifiedSampler(model, diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
+    sampler = UnifiedSampler(diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
     
     trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu)    
     
@@ -160,10 +160,14 @@ if __name__ == '__main__':
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
+    parser.add_argument("--pad_limit", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
     with open(config_file, 'r') as stream:
         config = yaml.load(stream, yaml.FullLoader)
 
+    if args.pad_limit is not None:
+        config['data']['pad_limit'] = args.pad_limit
+    
     main(args.name, config, args.load, args.num_samples, args.test, not args.use_true_lengths)

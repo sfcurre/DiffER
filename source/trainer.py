@@ -27,6 +27,7 @@ class UnifiedTrainer:
         self.coeff_vlb = coeff_vlb
         self.use_gpu = use_gpu
         self.min_time = min_time # TODO
+        self.debug = False
         
         RDLogger.DisableLog("rdApp.*")
 
@@ -57,18 +58,10 @@ class UnifiedTrainer:
     def print_metrics(self, val_loader, epoch, val_limit, pred_lengths=True):
         self.model.eval()
         metrics = defaultdict(list)
-        mols = []
         for i, batch in enumerate(val_loader):
             if i == val_limit:
                 break
-            batch_metrics, sampled_mols = self.val_step(batch, pred_lengths=pred_lengths)
-            
-            for j, sample in enumerate(sampled_mols):
-                data = {}
-                data['target'] = batch["target_smiles"][j]
-                data['sample'] = sample
-                data['source'] = batch["encoder_smiles"][j]
-                mols.append(data)
+            batch_metrics, _ = self.val_step(batch, pred_lengths=pred_lengths)
 
             for key, score in batch_metrics.items():
                 metrics[key].append(score)
@@ -91,13 +84,42 @@ class UnifiedTrainer:
         x_t = self.diffuser.qt_0_sample(batch['x_0'].max(dim=-1)[1], batch['t'], conditional_mask=batch['x_mask'])
         batch['x_t'] = F.one_hot(x_t, len(self.sampler.tokeniser)).to(torch.float)
         
+        if self.debug:
+            for k, v in batch.items():
+                try:
+                    print('train', k, v.shape, v[0])
+                except:
+                    print('train', k, len(v), v[0])
+
         output, lengths = self.model.forward(batch)
+
+        if self.debug:
+            for k, v in batch.items():
+                try:
+                    print('train', k, v.shape, v[0])
+                except:
+                    print('train', k, len(v), v[0])
+
+        if self.debug:
+            print('train output', output.shape, output[0])
+            print('train lengths', lengths.shape, lengths[0])
+
         total_loss = self._calc_loss(batch, output)['loss']
+
+        if self.debug:
+            print('train total_loss', total_loss.shape)
+
         if self.sampler.pad_limit > -1:
             total_loss += self._calc_length_loss(batch, lengths)
+
+        if self.debug:
+            print('train total_loss', total_loss.shape)
+
         total_loss.backward()
 
         self.optimizer.step()
+
+        self.debug=False
         return total_loss.cpu().item()
 
     def val_step(self, batch, pred_lengths=True):
@@ -139,38 +161,38 @@ class UnifiedTrainer:
                      conditional_mask=batch['x_mask'],
                      simplified_vlb=False)
         
-        tokens = batch["x_0"].max(dim=-1)[1]
-        # pad_mask = batch_input["target_mask"]
-        x_start = batch["x_0"]
-        t = batch['t']
-        loss = {}
-        loss_terms = ['nll']
+        # tokens = batch["x_0"].max(dim=-1)[1]
+        # # pad_mask = batch_input["target_mask"]
+        # x_start = batch["x_0"]
+        # t = batch['t']
+        # loss = {}
+        # loss_terms = ['nll']
 
-        if 'nll' in loss_terms or 'vb' in loss_terms:
-            lprobs = F.log_softmax(x_logits, dim=-1)
-            non_pad_mask = tokens.ne(self.sampler.pad_token_idx)
-            nll_loss = -lprobs.gather(dim=-1, index=tokens[..., None])
-            nll_loss = nll_loss.squeeze() * non_pad_mask
-            loss['nll'] = nll_loss.mean()
+        # if 'nll' in loss_terms or 'vb' in loss_terms:
+        #     lprobs = F.log_softmax(x_logits, dim=-1)
+        #     non_pad_mask = tokens.ne(self.sampler.pad_token_idx)
+        #     nll_loss = -lprobs.gather(dim=-1, index=tokens[..., None])
+        #     nll_loss = nll_loss.squeeze() * non_pad_mask
+        #     loss['nll'] = nll_loss.mean()
 
-        if 'mse' in loss_terms:
-            probs = F.softmax(x_logits, dim=-1)
-            mse_loss = (x_start - probs) ** 2
-            loss['mse'] = mse_loss.mean()
+        # if 'mse' in loss_terms:
+        #     probs = F.softmax(x_logits, dim=-1)
+        #     mse_loss = (x_start - probs) ** 2
+        #     loss['mse'] = mse_loss.mean()
 
-        if 'kl' in loss_terms or 'vb' in loss_terms:
-            log_x_t = torch.log(batch['x_t'])
-            log_true_prob = self.diffuser.q_posterior(torch.log_softmax(x_start, dim=-1), log_x_t, t)
-            log_model_prob = self.diffuser.q_posterior(torch.log_softmax(x_logits, dim=-1), log_x_t, t)
-            kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob))
-            loss['kl'] = kl.mean()
+        # if 'kl' in loss_terms or 'vb' in loss_terms:
+        #     log_x_t = torch.log(batch['x_t'])
+        #     log_true_prob = self.diffuser.q_posterior(torch.log_softmax(x_start, dim=-1), log_x_t, t)
+        #     log_model_prob = self.diffuser.q_posterior(torch.log_softmax(x_logits, dim=-1), log_x_t, t)
+        #     kl = -(log_true_prob.exp() * (log_true_prob - log_model_prob))
+        #     loss['kl'] = kl.mean()
 
-        if 'vb' in loss_terms:
-            mask = (t == torch.zeros_like(t)).float()
-            vb_loss = mask * nll_loss + (1. - mask) * kl
-            loss['vb'] = vb_loss.mean()
+        # if 'vb' in loss_terms:
+        #     mask = (t == torch.zeros_like(t)).float()
+        #     vb_loss = mask * nll_loss + (1. - mask) * kl
+        #     loss['vb'] = vb_loss.mean()
 
-        loss['loss'] = sum(loss[term] for term in loss_terms)
+        # loss['loss'] = sum(loss[term] for term in loss_terms)
 
         return loss
     
