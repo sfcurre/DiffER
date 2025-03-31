@@ -7,12 +7,17 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
 
+from scipy.stats import pointbiserialr
 from difflib import SequenceMatcher
 from collections import defaultdict, Counter
 from altair import datum
 
-from rdkit.Chem import Descriptors, Lipinski, rdMolDescriptors, Crippen, AllChem, Draw
-from rdkit import Chem, RDLogger
+from rdkit.Chem import rdMolDescriptors, AllChem, Draw
+from rdkit import Chem, RDLogger, DataStructs
+drawOptions = Draw.rdMolDraw2D.MolDrawOptions()
+drawOptions.prepareMolsBeforeDrawing = False
+from rdkit.Chem.Draw import IPythonConsole
+
 RDLogger.DisableLog("rdApp.*")
 
 rxn_types = {'<RX_1>': 'Heteroatom alkylation and arylation',
@@ -168,13 +173,24 @@ if not os.path.exists('st_data.tmp'):
         # data['CompressionRate'] = sys.getsizeof(canon_target.encode()) / sys.getsizeof(compressed)
         data['P2RSimilarity'].append(SequenceMatcher(None, canon_source, canon_target).ratio()) 
 
-        change_in_num_rings = rdMolDescriptors.CalcNumRings(Chem.MolFromSmiles(source)) - rdMolDescriptors.CalcNumRings(Chem.MolFromSmiles(target))
+        source_mol = Chem.MolFromSmiles(source)
+        target_mol = Chem.MolFromSmiles(target)
+        change_in_num_rings = rdMolDescriptors.CalcNumRings(source_mol) - rdMolDescriptors.CalcNumRings(target_mol)
         data['RingForming'].append(change_in_num_rings > 0)
         data['RingOpening'].append(change_in_num_rings < 0)
         data['NonRing'].append(change_in_num_rings == 0)
 
+        source_fingerprints = np.array(rdMolDescriptors.GetMorganFingerprintAsBitVect(source_mol, radius=2, nBits=2024))
+        target_fingerprints = np.array(rdMolDescriptors.GetMorganFingerprintAsBitVect(target_mol, radius=2, nBits=2024))
+        intersection = np.sum(source_fingerprints * target_fingerprints)
+        union = np.sum(source_fingerprints) + np.sum(target_fingerprints) - intersection
+        data['TanimotoSimilarity'].append(intersection/union if union > 0 else 0)
+
+        data['SourceMF'].append(list(source_fingerprints))
+        data['TargetMF'].append(list(target_fingerprints))
+
         synthesis = '.' in target
-        data['Synthesis'] = synthesis
+        data['Synthesis'].append(synthesis)
         
         valid, accurate = 0, 0
         rankings_by_plurality = defaultdict(int)
@@ -228,6 +244,8 @@ if not os.path.exists('st_data.tmp'):
                 max_smi_rating = rankings[smi]
             elif rankings[smi] == max_smi_rating:
                 max_smis.append(smi)
+
+        assert canon_target == Chem.MolToSmiles(target_mol)
 
         data['TargetSmiles'].append(canon_target)
         data['SampleValidity'].append(valid / len(smis))
@@ -342,7 +360,7 @@ col4.metric("k=10", f"{len(has_rank[has_rank['RankOfAccurate'] <= 10]) / len(val
 
 st.header('Metrics by reaction type:')
 
-col_names = ['Reaction Type', 'k=1', 'k=3', 'k=5', 'k=10', 'Support']
+col_names = ['Reaction Type', 'k=1', 'k=3', 'k=5', 'k=10', 'Support', 'AvgTargetLength', 'AvgSourceLength', 'AvgLengthIncrease', 'AvgSampleLengthMinusTargetLength', 'AvgP2RSimilarity', 'AvgTanimotoSimilarity']
 table = []
 for rxn_type in rxn_types.values():
     row=[]
@@ -354,15 +372,25 @@ for rxn_type in rxn_types.values():
     row.append(f"{len(has_rank[has_rank['RankOfAccurate'] <= 5]) / len(has_rxn_type):2.3%}")
     row.append(f"{len(has_rank[has_rank['RankOfAccurate'] <= 10]) / len(has_rxn_type):2.3%}")
     row.append(len(has_rxn_type))
+    row.append(has_rxn_type['TargetLength'].mean())
+    row.append(has_rxn_type['SourceLength'].mean())
+    row.append(has_rxn_type['TargetLengthIncrease'].mean())
+    row.append(has_rxn_type['SampleLengthMinusTargetLength'].mean())
+    row.append(has_rxn_type['P2RSimilarity'].mean())
+    row.append(has_rxn_type['TanimotoSimilarity'].mean())
     table.append(row)
 
 st.dataframe(pd.DataFrame(table, columns=col_names).sort_values(by='Support', ascending=False))
 
+st.header('Correlation of Dataset Statistics')
+
+st.dataframe(data.select_dtypes(include=['bool', 'number']).corr())
+
 st.header('Comparison of Molecular Properties for Molecules with and without Valid Samples')
 
 mode = st.selectbox("Mode:", ['HasValid', 'HasAccurate', 'MaxIsAccurate', 'MaxHasAccurate'], index=2, key='mode', placeholder='HasValid')
-var1 = st.selectbox("Choose X Property:", sorted(filter(lambda s: 'Smiles' not in s, data.columns)), key='var1', index=None, placeholder='TargetLengthIncrease')
-var2 = st.selectbox("Choose Y Property:", ['None'] + sorted(filter(lambda s: 'Smiles' not in s, data.columns)), key='var2', index=None, placeholder='SampleLengthIncrease')
+var1 = st.selectbox("Choose X Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='var1', index=None, placeholder='TargetLengthIncrease')
+var2 = st.selectbox("Choose Y Property:", ['None'] + sorted(data.select_dtypes(include=['bool', 'number']).columns), key='var2', index=None, placeholder='SampleLengthIncrease')
 
 if var1 is None:
     var1 = 'TargetLengthIncrease'
@@ -378,7 +406,7 @@ if var2 == 'None':
         binSpacing=0
     ).encode(
         alt.X(var1).bin(maxbins=40),
-        alt.Y('count():Q').stack(None),
+        alt.Y('count():Q'),
         alt.Color(mode + ':N').scale(domain=domain, range=range_)
     )
 
@@ -392,43 +420,91 @@ else:
 
 st.altair_chart(joint_chart, use_container_width=True)
 
-st.header('Accuracy and Validity rates of Diffusion Samples Compared to Molecular Properties of the Target')
+# st.header('Accuracy and Validity rates of Diffusion Samples Compared to Molecular Properties of the Target')
 
-var = st.selectbox("Choose Property:", filter(lambda s: 'Smiles' not in s, sorted(data.columns)), key='var', index=None, placeholder='SampleLengthMinusTargetLength')
+# var = st.selectbox("Choose Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='var', index=None, placeholder='SampleLengthMinusTargetLength')
 
-if var is None:
-    var = 'SampleLengthMinusTargetLength'
+# if var is None:
+#     var = 'SampleLengthMinusTargetLength'
 
-v_chart = alt.Chart(data).mark_rect().encode(
-    alt.X(var).bin(maxbins=20),
-    alt.Y('SampleValidity').bin(maxbins=11),
-    alt.Color('count():Q').scale(scheme='greenblue')
-    ).properties(
-    width=200,
-    height=200        
-)
+# v_chart = alt.Chart(data).mark_rect().encode(
+#     alt.X(var).bin(maxbins=20),
+#     alt.Y('SampleValidity').bin(maxbins=11),
+#     alt.Color('count():Q').scale(scheme='greenblue')
+#     ).properties(
+#     width=200,
+#     height=200        
+# )
 
-a_chart = alt.Chart(data).mark_rect().encode(
-    alt.X(var).bin(maxbins=20),
-    alt.Y('SampleAccuracy').bin(maxbins=11),
-    alt.Color('count():Q').scale(scheme='greenblue')
-    ).properties(
-    width=200,
-    height=200        
-)
+# a_chart = alt.Chart(data).mark_rect().encode(
+#     alt.X(var).bin(maxbins=20),
+#     alt.Y('AccuracyOfValid').bin(maxbins=11),
+#     alt.Color('count():Q').scale(scheme='greenblue')
+#     ).properties(
+#     width=200,
+#     height=200        
+# )
 
-st.altair_chart(v_chart | a_chart, use_container_width=True)
+# st.altair_chart(v_chart | a_chart, use_container_width=True)
+
+st.header('Morgan Fingerprint Analysis')
+fvar = st.selectbox("Choose Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='fvar', index=None, placeholder='HasAccurate')
+
+if fvar is None:
+    fvar='HasAccurate'
+
+fps = np.array(list(data['TargetMF']))
+if data[fvar].dtype == 'bool':
+    corrs = np.array([((data[fvar] * 2 - 1) * (fps[:, i] * 2 - 1)).mean() for i in range(fps.shape[-1])])
+    corrs = np.round(corrs, 5)
+    pvals = None
+else:
+    stats = [pointbiserialr(data[fvar], fps[:, i]) for i in range(fps.shape[-1])]
+    corrs = np.round(np.array([s.statistic for s in stats]), 5)
+    pvals = np.round(np.array([s.pvalue for s in stats]), 5)
+counts = fps.sum(axis=0)
+arg_corrs = np.argsort(corrs)
+arg_corrs = arg_corrs[counts[arg_corrs] > 0]
+top_neg, top_pos = arg_corrs[:10], arg_corrs[-10:]
+
+mols = []
+for fpbit in top_neg:
+    i = np.random.choice(np.where(fps[:, fpbit] == 1)[0])
+    mol = Chem.MolFromSmiles(data.index[i])
+    info={}
+    fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=2024, bitInfo=info)
+    mols.append((mol, fpbit, info))
+
+img=Draw.DrawMorganBits(mols, molsPerRow=5, legends=[str(x) for x in zip(corrs[top_neg], counts[top_neg])], drawOptions=drawOptions)
+st.image(img)
+
+mols = []
+for fpbit in top_pos:
+    i = np.random.choice(np.where(fps[:, fpbit] == 1)[0])
+    mol = Chem.MolFromSmiles(data.index[i])
+    info={}
+    fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=2024, bitInfo=info)
+    mols.append((mol, fpbit, info))
+
+img=Draw.DrawMorganBits(mols, molsPerRow=5, legends=[str(x) for x in zip(corrs[top_pos], counts[top_pos])], drawOptions=drawOptions)
+st.image(img)
 
 st.header('Randomly Generated Example Reactions')
+rxn_type = st.selectbox("Specify a Reaction Type?", ['None'] + list(rxn_types.values()), key='rxn_type', index=0, placeholder='None')
+
+sub_samples = samples
+if rxn_type != 'None':
+    has_rxn_type = set(data[data['ReactionType'] == rxn_type]['SourceSmiles'])
+    sub_samples = {k: v for k, v in samples.items() if k in has_rxn_type}
 
 if st.button('Generate'):
     for i in range(5):
-        source = np.random.choice(list(samples))
+        source = np.random.choice(list(sub_samples))
         canon_source = canonicalize(source)
         sm = Chem.MolFromSmiles(source)
         AllChem.Compute2DCoords(sm)
         
-        target = samples[source]['target']
+        target = sub_samples[source]['target']
         tm = Chem.MolFromSmiles(target)
         AllChem.Compute2DCoords(tm)
         canon_target = Chem.MolToSmiles(tm)
@@ -441,7 +517,7 @@ if st.button('Generate'):
 
         rankings = defaultdict(int)
         valid = 0
-        for smi in samples[source]['samples']:
+        for smi in sub_samples[source]['samples']:
             num_pad = smi.count('?')
             smi = canonicalize(smi)
             if smi is None or smi == canon_source:
@@ -459,8 +535,8 @@ if st.button('Generate'):
             legs.append(f'{"*" if smi == canon_target else ""}Rating: {rating} ({rating  / valid:2.3%})')
         
         max_mols = 7
-        img=Draw.MolsToGridImage(mols[:max_mols], molsPerRow=min(len(mols), max_mols),subImgSize=(300,300),legends=legs, returnPNG=True)
-        st.image(img)
+        img=Draw.MolsToGridImage(mols[:max_mols], molsPerRow=min(len(mols), max_mols),subImgSize=(300,300),legends=legs, useSVG=True)
+        st.image(img._repr_svg_())
 
 st.header("Reaction Search")
 source_smiles = st.text_input('Source (Product) SMILES')
@@ -501,8 +577,8 @@ if source_smiles:
             legs.append(f'{"*" if smi == canon_target else ""}Rating: {rating} ({rating  / valid:2.3%})')
         
         max_mols = 7
-        img=Draw.MolsToGridImage(mols[:max_mols], molsPerRow=min(len(mols), max_mols),subImgSize=(300,300),legends=legs, returnPNG=True)
-        st.image(img)
+        img=Draw.MolsToGridImage(mols[:max_mols], molsPerRow=min(len(mols), max_mols),subImgSize=(300,300),legends=legs, useSVG=True)
+        st.image(img._repr_svg_())
 
 else:
     st.write('Not a valid SMILES string.')
