@@ -15,9 +15,9 @@ This code is heavily inspired by Chemformer (https://github.com/MolecularAI/Chem
 and adapted from continuous discrete diffusion (https://github.com/andrew-cr/tauLDR)
 '''
 
-class RLSampler(UnifiedSampler):
+class ForwardGuidanceSampler(UnifiedSampler):
     def __init__(self, *args, **kwargs):
-        super(RLSampler, self).__init__(
+        super(ForwardGuidanceSampler, self).__init__(
             *args, **kwargs
         )
         
@@ -66,10 +66,27 @@ class RLSampler(UnifiedSampler):
             s_tensor = torch.full((length_mask.shape[0],), s, device=device)            
 
             logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
+            fprob_t = F.softmax(logits, dim=-1)
+            x_t = x_t.max(dim=-1)[1]
 
             # Run guidance model on token_output
             ##############################
-            classifier_output = guidance_model.forward(x_t, length_mask)
+            
+            y_t = self.diffuser.qt_0_sample(batch['y_0'].max(dim=-1)[1], batch['t'], conditional_mask=batch['y_mask'])
+            y_t = F.one_hot(y_t, len(self.tokeniser)).to(torch.float)
+            g_memory, g_memory_pad_mask, _ = guidance_model.encode(fprob_t, batch['x_mask'])
+            classifier_output = self.decode(y_t, batch['y_mask'], g_memory, g_memory_pad_mask, batch['t'])
+            classifier_loss = self.diffuser.compute_loss( 
+                                classifier_output,
+                                batch['y_t'].max(dim=-1)[1], 
+                                batch['y_0'].max(dim=-1)[1],
+                                batch['t'], 
+                                m=None, 
+                                coeff_ce=self.coeff_ce,
+                                coeff_vlb=self.coeff_vlb,
+                                conditional_mask=batch['y_mask'],
+                                simplified_vlb=False)
+
             classifier_log_prob = F.log_softmax(classifier_output, dim=2)
             classifier_log_prob.sum().backward(retain_graph=True)
             classifier_grad = classifier_log_prob.grad
@@ -90,8 +107,6 @@ class RLSampler(UnifiedSampler):
             optimizer.step()
 
             ##############################
-            fprob_t = F.softmax(logits, dim=2)
-            x_t = x_t.max(dim=-1)[1]
             
             prob_s = self.diffuser.ps_t_prob(fprob_t, x_t, t_tensor, s_tensor).type(torch.float)
             prob_s[s==0] = fprob_t[s==0]
@@ -127,7 +142,7 @@ class RLSampler(UnifiedSampler):
         if verbose:
             print('-' * 20)
 
-        x_t = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor.to(device))
+        x_t = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
         
         ids = x_t.max(dim=-1)[1].cpu().numpy()
         tokens = self.tokeniser.convert_ids_to_tokens(ids)

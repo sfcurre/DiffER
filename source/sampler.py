@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .discrete_diffusion import *
-from .utils import noise_schedule
 from rdkit import Chem, RDLogger
 
 '''
@@ -25,7 +24,6 @@ class UnifiedSampler(nn.Module):
         self.min_time = min_time
         self.pad_limit = pad_limit
         self.pad_token_idx = self.tokeniser.vocab[self.tokeniser.pad_token]
-        self.debug = False
 
         self.ratio_eps = 1e-9
         self.update_Lt = False
@@ -48,14 +46,6 @@ class UnifiedSampler(nn.Module):
         return x_t, length_mask
 
     def sample(self, batch, model, verbose=True, pred_lengths=True, clean=True, record_attns=False, num_samples=1):
-
-        if self.debug:
-            for k, v in batch.items():
-                try:
-                    print('sample', k, v.shape, v[0])
-                except:
-                    print('sample', k, len(v), v[0])
-
         memory, memory_pad_mask, predicted_lengths = model.encode(batch['y_0'], batch['y_mask'])
             
         if pred_lengths:
@@ -87,7 +77,6 @@ class UnifiedSampler(nn.Module):
         device = x_t.device
 
         for idx, t in enumerate(ts[0:-1]):
-            if idx > 2: self.debug = False
             if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 200]:
                 ids = x_t.max(dim=-1)[1].cpu().numpy()
                 tokens = self.tokeniser.convert_ids_to_tokens(ids)
@@ -99,31 +88,16 @@ class UnifiedSampler(nn.Module):
             t_tensor = torch.full((length_mask.shape[0],), t, device=device)
             s_tensor = torch.full((length_mask.shape[0],), s, device=device)
 
-            if self.debug:
-                print('sample x_t', x_t.shape, x_t[0])   
-                print('sample length_mask', length_mask.shape, length_mask[0])   
-                print('sample memory', memory.shape, memory[0])   
-                print('sample memory_pad_mask', memory_pad_mask.shape, memory_pad_mask[0])   
-                print('sample t_tensor', t_tensor.shape, t_tensor[0])   
-
             logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
-            if self.debug:
-                print('sample logits', logits.shape, logits[0])
             fprob_t = F.softmax(logits, dim=-1)
             x_t = x_t.max(dim=-1)[1]
             
             prob_s = self.diffuser.ps_t_prob(fprob_t, x_t, t_tensor, s_tensor).type(torch.float)
-            if self.debug:
-                print('sample prob_s', prob_s.shape, prob_s[0])
             prob_s[s==0] = fprob_t[s==0]
 
             x_s = sample_categorical(prob_s)
-            if self.debug:
-                print('sample x_s', x_s.shape, x_s[0])
             x_s[batch['x_mask']] = x_t[batch['x_mask']]
             x_t = F.one_hot(x_s, len(self.tokeniser)).to(torch.float)
-            if self.debug:
-                print('sample x_t', x_t.shape, x_t[0])
 
             if verbose and ((idx < 10) or (idx % 20 == 0)):
                 ids = x_t.max(dim=-1)[1].cpu().numpy()
@@ -148,7 +122,7 @@ class UnifiedSampler(nn.Module):
         if verbose:
             print('-' * 20)
 
-        x_t = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor.to(device))
+        x_t = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
         
         ids = x_t.max(dim=-1)[1].cpu().numpy()
         tokens = self.tokeniser.convert_ids_to_tokens(ids)
