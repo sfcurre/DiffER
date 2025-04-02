@@ -1,12 +1,14 @@
 import argparse, os, yaml
 
 import torch
+from functools import partial
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
+from source.conditional_moe_model import ConditionalMoEModel
 from source.discrete_diffusion import UnifiedDiscreteDiffusion
 from source.trainer import UnifiedTrainer
 from source.sampler import UnifiedSampler
@@ -46,7 +48,13 @@ def main(name, config, load):
                                         collate_fn=dataset.collate_fn)
     print("Finished datasets.")
 
-    model = ConditionalModel(
+    model_class = ConditionalModel
+    moe_weight = 0
+    if 'moe' in config['model'] and config['model']['moe']:
+        model_class = partial(ConditionalMoEModel, num_experts=config['model']['num_experts'])
+        moe_weight = config['model']['moe_loss_weight']
+
+    model = model_class(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
         d_model=config['model']['d_model'],
@@ -73,7 +81,7 @@ def main(name, config, load):
                                         )
     sampler = UnifiedSampler(diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
 
-    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu)
+    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu, moe_loss=moe_weight)
 
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')

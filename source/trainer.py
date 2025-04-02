@@ -16,7 +16,7 @@ This code is inspired by https://github.com/ehoogeboom/multinomial_diffusion/tre
 '''
 
 class UnifiedTrainer:
-    def __init__(self, model, optimizer, diffuser, sampler, name='Default', length_loss = 'cross_entropy', coeff_ce=1., coeff_vlb=1., use_gpu=True, min_time=0.01):
+    def __init__(self, model, optimizer, diffuser, sampler, name='Default', length_loss = 'cross_entropy', coeff_ce=1., coeff_vlb=1., use_gpu=True, min_time=0.01, moe_loss=0):
         self.model = model
         self.optimizer = optimizer
         self.diffuser = diffuser
@@ -27,7 +27,8 @@ class UnifiedTrainer:
         self.coeff_vlb = coeff_vlb
         self.use_gpu = use_gpu
         self.min_time = min_time # TODO
-        
+        self.moe_loss = moe_loss
+
         RDLogger.DisableLog("rdApp.*")
 
     def train(self, dataloaders, epochs, val_limit=100, pred_lengths=True):
@@ -131,6 +132,9 @@ class UnifiedTrainer:
                      coeff_vlb=self.coeff_vlb,
                      conditional_mask=batch['x_mask'],
                      simplified_vlb=False)
+        if self.moe_loss:
+            loss['aux_loss'] = self.model.get_aux_loss().mean()
+            loss['loss'] += self.moe_loss * loss['aux_loss']
         return loss
     
     def _calc_length_loss(self, batch_input, pred_lengths):
