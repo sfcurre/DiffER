@@ -133,7 +133,7 @@ class UnifiedTrainer:
                      conditional_mask=batch['x_mask'],
                      simplified_vlb=False)
         if self.moe_loss:
-            loss['aux_loss'] = self.model.get_aux_loss().mean()
+            loss['aux_loss'] = self.model.get_aux_loss()
             loss['loss'] += self.moe_loss * loss['aux_loss']
         return loss
     

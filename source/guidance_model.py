@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from rdkit import Chem, RDLogger
 
-from utils import canonicalize
+from .utils import canonicalize
 
 '''
 This code is heavily inspired by Chemformer (https://github.com/MolecularAI/Chemformer)
@@ -20,6 +20,7 @@ class GuidanceModel(nn.Module):
         ):
         super(GuidanceModel, self).__init__()
 
+        self.d_model = conditional_model.d_model
         self.tokeniser = conditional_model.tokeniser
         self.max_seq_len = conditional_model.max_seq_len
 
@@ -35,7 +36,6 @@ class GuidanceModel(nn.Module):
 
         self.output_fc = nn.Linear(conditional_model.d_model, 1)
 
-        self._init_params()
         self.register_buffer("pos_emb", self.positional_embs())
 
         self.memory = {}
@@ -43,7 +43,7 @@ class GuidanceModel(nn.Module):
         RDLogger.DisableLog("rdApp.*")
 
     def forward(self, encoder_input, encoder_pad_mask):
-        encoder_embs = self.embed_onehot(encoder_input)
+        encoder_embs = self.embed_log_onehot(encoder_input)
         batch, _, _ = tuple(encoder_embs.size())
         
         len_tokens = self.length_rep(torch.zeros(batch, 1, dtype=torch.int32, device=encoder_embs.device))
@@ -57,9 +57,10 @@ class GuidanceModel(nn.Module):
 
         return output
     
-    def embed_onehot(self, onehot_input, t=None):
+    def embed_log_onehot(self, onehot_input, t=None):
         _, seq_len, _ = tuple(onehot_input.size())
 
+        onehot_input = torch.exp(onehot_input)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
@@ -72,7 +73,7 @@ class GuidanceModel(nn.Module):
         return onehot_embs
     
     def get_canonical(self, tgt_tokens):
-        ids = tgt_tokens.max(dim=-1)[1].transpose(0, 1).cpu().numpy()
+        ids = tgt_tokens.max(dim=-1)[1].cpu().numpy()
         tokens = self.tokeniser.convert_ids_to_tokens(ids)
         sampled_mols = self.tokeniser.detokenise(tokens)
         sampled_mols = list(map(canonicalize, (m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols)))

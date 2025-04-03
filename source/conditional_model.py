@@ -32,7 +32,7 @@ class ConditionalModel(nn.Module):
         self.num_heads = num_heads
         self.d_feedforward = d_feedforward
         self.activation = activation
-        self.dropout = dropout
+        self.dropout_ = dropout
 
         self.vocab_size = vocab_size = len(tokeniser)
         self.pad_token_idx = pad_token_idx = self.tokeniser.vocab[self.tokeniser.pad_token]

@@ -69,23 +69,25 @@ class GuidanceSampler(UnifiedSampler):
 
             # Run guidance model on token_output
             ##############################
-            classifier_output = guidance_model.forward(x_t, length_mask)
-            classifier_log_prob = F.log_softmax(classifier_output, dim=2)
+            log_x_t = torch.log(x_t)
+            log_x_t.requires_grad = True
+            classifier_output = guidance_model.forward(log_x_t, length_mask)
+            classifier_log_prob = F.log_softmax(classifier_output, dim=-1)
             classifier_log_prob.sum().backward(retain_graph=True)
-            classifier_grad = classifier_log_prob.grad
+            classifier_log_prob = log_x_t.grad
 
-            classifier_log_prob_ratio = (
-                classifier_grad - (x_t * classifier_grad).sum(dim=-1, keepdim=True)
-            ).detach().requires_grad_(False)
-            classifier_log_prob = (
-                classifier_log_prob_ratio +
-                classifier_log_prob[..., None, None]
-            ).detach().requires_grad_(False)
+            # classifier_log_prob_ratio = (
+            #     classifier_grad - (x_t * classifier_grad).sum(dim=-1, keepdim=True)
+            # ).detach().requires_grad_(False)
+            # classifier_log_prob = (
+            #     classifier_log_prob_ratio +
+            #     classifier_log_prob[..., None]
+            # ).detach().requires_grad_(False)
 
             valid_scores, scores = guidance_model.get_scores(x_t)
 
             optimizer.zero_grad()
-            classifier_loss = guidance_model.get_loss(classifier_output, scores)
+            classifier_loss = guidance_model.get_loss(classifier_output, scores.to(classifier_output.device))
             classifier_loss.sum().backward()
             optimizer.step()
 

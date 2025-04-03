@@ -63,6 +63,10 @@ class UnifiedSampler(nn.Module):
             lengths = lengths.repeat(num_samples)
             memory = memory.repeat(num_samples, 1, 1)
             memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
+            batch['x_mask'] = batch['x_mask'].repeat(num_samples, 1)
+            batch['encoder_smiles'] *= num_samples
+            batch['decoder_smiles'] *= num_samples
+            batch['target_smiles'] *= num_samples
 
         x_t, length_mask = self.init_noise(lengths)
     

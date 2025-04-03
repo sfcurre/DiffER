@@ -89,7 +89,7 @@ class ForwardGuidanceSampler(UnifiedSampler):
 
             classifier_log_prob = F.log_softmax(classifier_output, dim=2)
             classifier_log_prob.sum().backward(retain_graph=True)
-            classifier_grad = classifier_log_prob.grad
+            classifier_grad = x_t.grad
 
             classifier_log_prob_ratio = (
                 classifier_grad - (x_t * classifier_grad).sum(dim=-1, keepdim=True)

@@ -1,5 +1,6 @@
 
 import torch
+import torch.nn as nn
 from .conditional_model import ConditionalModel
 from switch_transformers import SwitchMoE
 
@@ -12,7 +13,7 @@ class ConditionalMoEModel(ConditionalModel):
         super(ConditionalMoEModel, self).__init__(*args, **kwargs)
         self.num_experts = num_experts
         self.return_aux_loss = return_aux_loss
-        self.moes = torch.ModuleList([self.build_moe() for i in range(self.num_layers)])
+        self.moes = nn.ModuleList([self.build_moe() for i in range(self.num_layers)])
         self.patch_feedforward()
         self.aux_loss = 0
 
@@ -34,7 +35,7 @@ class ConditionalMoEModel(ConditionalModel):
                         output_dim=self.d_model, 
                         num_experts=self.num_experts, 
                         mult=self.d_feedforward // self.d_model,
-                        dropout=self.dropout,
+                        dropout=self.dropout_,
                         use_aux_loss=self.return_aux_loss)
         return moe
         
@@ -51,4 +52,7 @@ class ConditionalMoEModel(ConditionalModel):
             return logits, predicted_lengths, aux_loss
         return logits, predicted_lengths
     
-    def get_aux_loss
+    def get_aux_loss(self):
+        aux_loss = self.aux_loss
+        self.aux_loss = 0
+        return aux_loss
