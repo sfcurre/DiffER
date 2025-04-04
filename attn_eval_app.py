@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os, pickle
+import os, pickle, re
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
@@ -9,6 +9,8 @@ import torch
 from streamlit_image_select import image_select
 
 from rdkit.Chem import rdMolDescriptors, AllChem, Draw
+from rdkit.Chem.Draw import rdMolDraw2D, SimilarityMaps
+
 from rdkit import Chem, RDLogger
 RDLogger.DisableLog("rdApp.*")
 
@@ -166,82 +168,118 @@ if reaction_id is None:
 reaction = sources[reaction_id]
 tokenised_reaction = ['<L>'] + tokeniser.tokenise([reaction])['original_tokens'][0]
 
-st.write('Here are the encoder attention maps:')
-attns = data[reaction]['in_attns']
+if st.checkbox('View encoder attention maps?'):
+    st.write('Here are the encoder attention maps:')
+    attns = data[reaction]['in_attns']
 
-for m, attn_block in attns.items():
-    x_ticks_i = {
-        0: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
-        1: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
-        2: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction)
-    }
-    y_ticks_i = {
-        0: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
-        1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
-        2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
-    }
-    for i in range(3):
-        fig = plt.figure(figsize=(10, 10))
-        sns.heatmap(attn_block.mean(axis=i)[:len(tokenised_reaction), :len(tokenised_reaction)], cmap='viridis', square=True)
-        plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
-        plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
-        plt.title(f'Layer {m}')
-        st.pyplot(fig)
+    for m, attn_block in attns.items():
+        x_ticks_i = {
+            0: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
+            1: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
+            2: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction)
+        }
+        y_ticks_i = {
+            0: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
+            1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
+            2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
+        }
+        for i in range(3):
+            fig = plt.figure(figsize=(10, 10))
+            sns.heatmap(attn_block.mean(axis=i)[:len(tokenised_reaction), :len(tokenised_reaction)], cmap='viridis', square=True)
+            plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.title(f'Layer {m}')
+            st.pyplot(fig)
 
-st.write('Here are the decoder multihead attention maps:')
-step = st.selectbox('Diffusion step:', [1, 10, 50, 100, 150, 199], index=0, key='step')
-if step is None:
-    st.stop()
+        avg_source_attn = np.mean(attn_block.numpy(), axis=(0,1))
+        attn_by_token = zip(tokenised_reaction, avg_source_attn)
+        mol = Chem.MolFromSmiles(reaction)
+        atom_colors = {}
+        atom_finder = re.compile(r"(Cl?|Br?|[NOSPFIbcnosp*]|\[[^]]+\])", re.X)
+        atoms = atom_finder.findall(reaction)
+        first = next(attn_by_token)
+        atom_ids = []
+        atom_weights = []
+        for atom, atom_str in zip(mol.GetAtoms(), atoms):
+            while first[0] != atom_str:
+                first = next(attn_by_token)
+            atom_ids.append(atom.GetIdx())
+            atom_weights.append(float(first[1]))            
+        
+        max_weight = max(atom_weights)
+        atom_weights = [(w / max_weight) ** 2 for w in atom_weights]
 
-attns = data[reaction]['out_attns'][step]
-smiles = data[reaction]['x_t'][step]
-tokenised_smiles = tokeniser.tokenise([smiles])['original_tokens'][0]
+        d = rdMolDraw2D.MolDraw2DCairo(500, 500)
+        SimilarityMaps.GetSimilarityMapFromWeights(mol, atom_weights, draw2d=d)
+        st.image(d.GetDrawingText())
+        
+if st.checkbox('View decoder multihead attention maps?'):
+    st.write('Here are the decoder multihead attention maps:')
+    mh_step = st.selectbox('Diffusion step:', [1, 10, 50, 100, 150, 199], index=0, key='mh_step')
+    if mh_step is None:
+        st.stop()
 
-cutoff_len = len(tokenised_smiles) - smiles.count('?') + 5
-tokenised_smiles = tokenised_smiles[:cutoff_len]
+    attns = data[reaction]['out_attns'][mh_step]
+    smiles = data[reaction]['x_t'][mh_step]
+    tokenised_smiles = tokeniser.tokenise([smiles])['original_tokens'][0]
 
-for m, attn_block in attns.items():
-    if not m.startswith('m'):
-        continue
-    
-    x_ticks_i = {
-        0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
-        1: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
-        2: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles)
-    }
-    y_ticks_i = {
-        0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
-        1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
-        2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
-    }
-    for i in range(3):
-        fig = plt.figure(figsize=(10, 10))
-        sns.heatmap(attn_block.mean(axis=i)[:cutoff_len, :cutoff_len], cmap='viridis', square=True)
-        plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
-        plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
-        plt.title(f'Layer {m}')
-        st.pyplot(fig)
+    cutoff_len = len(tokenised_smiles) - smiles.count('?') + 5
+    tokenised_smiles = tokenised_smiles[:cutoff_len]
 
-st.write('Here are the decoder self attention maps:')
-for m, attn_block in attns.items():
-    if not m.startswith('s'):
-        continue
-    
-    x_ticks_i = {
-        0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
-        1: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
-        2: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles)
-    }
-    y_ticks_i = {
-        0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
-        1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
-        2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
-    }
-    for i in range(3):
-        fig = plt.figure(figsize=(10, 10))
-        sns.heatmap(attn_block.mean(axis=i)[:cutoff_len, :cutoff_len], cmap='viridis', square=True)
-        plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
-        plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
-        plt.title(f'Layer {m}')
-        st.pyplot(fig)
+    for m, attn_block in attns.items():
+        if not m.startswith('m'):
+            continue
+        
+        x_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            2: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles)
+        }
+        y_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
+            2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
+        }
+        for i in range(3):
+            fig = plt.figure(figsize=(10, 10))
+            sns.heatmap(attn_block.mean(axis=i)[:cutoff_len, :cutoff_len], cmap='viridis', square=True)
+            plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.title(f'Layer {m}')
+            st.pyplot(fig)
+
+if st.checkbox('View decoder self attention maps?'):
+    st.write('Here are the decoder self attention maps:')
+    s_step = st.selectbox('Diffusion step:', [1, 10, 50, 100, 150, 199], index=0, key='s_step')
+    if s_step is None:
+        st.stop()
+
+    attns = data[reaction]['out_attns'][s_step]
+    smiles = data[reaction]['x_t'][s_step]
+    tokenised_smiles = tokeniser.tokenise([smiles])['original_tokens'][0]
+
+    cutoff_len = len(tokenised_smiles) - smiles.count('?') + 5
+    tokenised_smiles = tokenised_smiles[:cutoff_len]
+
+    for m, attn_block in attns.items():
+        if not m.startswith('s'):
+            continue
+        
+        x_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            2: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles)
+        }
+        y_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
+            2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
+        }
+        for i in range(3):
+            fig = plt.figure(figsize=(10, 10))
+            sns.heatmap(attn_block.mean(axis=i)[:cutoff_len, :cutoff_len], cmap='viridis', square=True)
+            plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.title(f'Layer {m}')
+            st.pyplot(fig)
 
