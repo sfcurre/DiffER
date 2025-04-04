@@ -10,6 +10,15 @@ def move_batch_to_gpu(batch):
             batch[key] = value.cuda()
     batch['device'] = 'cuda'
 
+def repeat_batch(batch, num_samples):
+    batch['y_0'] = batch['y_0'].repeat(num_samples, 1, 1)
+    batch['x_0'] = batch['x_0'].repeat(num_samples, 1, 1)
+    batch['y_mask'] = batch['y_mask'].repeat(num_samples, 1)
+    batch['x_mask'] = batch['x_mask'].repeat(num_samples, 1)
+    batch['encoder_smiles'] *= num_samples
+    batch['decoder_smiles'] *= num_samples
+    batch['target_smiles'] *= num_samples
+
 def canonicalize(smi):
     smi = smi.replace('?', '')
     m = Chem.MolFromSmiles(smi)

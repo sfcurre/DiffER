@@ -25,7 +25,7 @@ model:
 
   #diffusion parameters
   continuous: True
-  num_timesteps: 200
+  num_timesteps: 100
   min_time: 0.01
   noise_schedule: 'loglinear'
   noise_schedule_args: {}

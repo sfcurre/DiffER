@@ -12,7 +12,7 @@ from source.guidance_model import GuidanceModel
 from source.particle_guidance_model import ParticleGuidanceModel
 from source.guidance_sampler import GuidanceSampler
 from source.forward_guidance_sampler import ForwardGuidanceSampler
-from source.utils import move_batch_to_gpu
+from source.utils import move_batch_to_gpu, repeat_batch
 
 import json
 
@@ -53,7 +53,7 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
         dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
-                                        shuffle=True,
+                                        shuffle=False,
                                         num_workers=num_workers,
                                         collate_fn=dataset.collate_fn)
     print("Finished datasets.")
@@ -110,11 +110,14 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
     for i, batch in enumerate(dataloaders[DATASET]):
         
         targets = {}
-        for target, source in zip(batch['decoder_smiles'], batch['encoder_smiles']):
+        for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
         
         if use_gpu:
             move_batch_to_gpu(batch)
+
+        if num_samples > 1:
+            repeat_batch(batch, num_samples)
 
         sampled_mols, _ = sampler.sample(batch,
                                           model,
@@ -122,8 +125,7 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
                                           optimizer,
                                           verbose=False,
                                           pred_lengths=pred_lengths,
-                                          clean=False,
-                                          num_samples=num_samples)
+                                          clean=False)
         for j, smi in enumerate(sampled_mols):
             targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
@@ -138,10 +140,11 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
                                                                    record_attns=True)
             for j, smi in enumerate(sampled_mols):
                 attns[batch['encoder_smiles'][j]] = smi_data = {}
-                smi_data['target'] = batch['target_smiles'][j]
+                smi_data['target'] = batch['decoder_smiles'][j]
                 smi_data['sample'] = smi
-                smi_data['in_attns'] = {k: v[:, i] for k, v in in_attns.items()}
-                smi_data['out_attns'] = {t: {k: v[:, i] for k, v in out_t} for t, out_t in out_attns}
+                smi_data['in_attns'] = {k: v[j, :] for k, v in in_attns.items()}
+                smi_data['x_t'] = {t: k[j] for t, (k, _) in out_attns.items()}
+                smi_data['out_attns'] = {t: {k: v[j, :] for k, v in out_t.items()} for t, (_, out_t) in out_attns.items()}
 
         print(f'Batch {i} complete.')
         
@@ -154,7 +157,7 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
         with open(f"out/samples/{name}_samples.json", 'w') as fp:
             json.dump(all_targets, fp)
 
-        if args.record_attns:
+        if i < args.record_attns:
             torch.save(attns, f"out/samples/attns/{name}_attns.json")
 
     print('Evaluation complete.')
@@ -165,13 +168,14 @@ if __name__ == '__main__':
     parser.add_argument("--name", type=str)
     parser.add_argument("--config_path", type=str)
     parser.add_argument("--load", type=str, default='')
-    parser.add_argument("--num_samples", type=int, default=20)
+    parser.add_argument("--num_samples", type=int, default=1)
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
     parser.add_argument("--pad_limit", type=int, default=None)
     parser.add_argument("--memory", action='store_true')
     parser.add_argument("--forward", type=str, default='')
+    parser.add_argument("--batch_size", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
@@ -180,7 +184,10 @@ if __name__ == '__main__':
 
     if args.pad_limit is not None:
         config['data']['pad_limit'] = args.pad_limit
-    
+
+    if args.batch_size is not None:
+        config['training']['batch_size'] = args.batch_size
+
     guidance_type = 'particle'
     if args.memory:
         guidance_type = 'memory'

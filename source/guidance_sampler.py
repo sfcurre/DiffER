@@ -21,7 +21,7 @@ class GuidanceSampler(UnifiedSampler):
             *args, **kwargs
         )
         
-    def sample(self, batch, model, guidance_model, optimizer, gamma=0.5, verbose=True, pred_lengths=True, clean=True, record_attns=False, num_samples=1):
+    def sample(self, batch, model, guidance_model, optimizer, gamma=0.5, verbose=True, pred_lengths=True, clean=True, record_attns=False):
         
         memory, memory_pad_mask, predicted_lengths = model.encode(batch['y_0'], batch['y_mask'])
             
@@ -36,11 +36,6 @@ class GuidanceSampler(UnifiedSampler):
         else:
             lengths = self.get_lengths_from_padding(batch['x_mask'])
 
-        if num_samples > 1:
-            lengths = lengths.repeat(num_samples)
-            memory = memory.repeat(num_samples, 1, 1)
-            memory_pad_mask = memory_pad_mask.repeat(num_samples, 1)
-
         x_t, length_mask = self.init_noise(lengths)
     
         if verbose:
@@ -54,12 +49,11 @@ class GuidanceSampler(UnifiedSampler):
         device = x_t.device
 
         for idx, t in enumerate(ts[0:-1]):
-            if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 200]:
+            if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 199]:
                 ids = x_t.max(dim=-1)[1].cpu().numpy()
                 tokens = self.tokeniser.convert_ids_to_tokens(ids)
                 sampled_mols = self.tokeniser.detokenise(tokens)
-                m = sampled_mols[0]
-                out_attns[idx + 1] = [m]
+                out_attns[idx + 1] = [sampled_mols]
 
             s = ts[idx+1]
             t_tensor = torch.full((length_mask.shape[0],), t, device=device)
@@ -123,8 +117,8 @@ class GuidanceSampler(UnifiedSampler):
                 if verbose:
                     print(f'{t}: {m}')
             
-            if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 200]:
-                out_attns[idx + 1].append(model.get_attns('decoder'))
+            if record_attns and (idx + 1) in [1, 10, 50, 100, 150, 199]:
+                out_attns[idx + 1].append(model.get_attn('decoder'))
 
         if verbose:
             print('-' * 20)

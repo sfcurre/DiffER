@@ -3,7 +3,7 @@
 #SBATCH -N 1                    # use 1 node
 #SBATCH -n 1                    # 1 task
 #SBATCH --cpus-per-task 4       # cpu cores to use
-#SBATCH -t 1-00:00:00            # 0 days, 6 hours, 0 minutes, 0 seconds
+#SBATCH -t 2-00:00:00            # 0 days, 6 hours, 0 minutes, 0 seconds
 #SBATCH -p gpu_batch            # use the gpu partition
 #SBATCH -J RetroDiffusion       # Job name
 #SBATCH --mem=32000             # 32000 MB memory (RAM)
@@ -25,7 +25,7 @@ conda activate deepchem
 cd ~/Retro-Diffusion
 
 PadLimit=20
-FineTune=0
+FineTune=2
 FineTuneSub=$((FineTune-1))
 
 # python eval.py --name "BackwardDiffusion_PadLimit$PadLimit-${FineTune}" --config_path "configs/pad_limit_spec.yaml" --load "out/models/BackwardDiffusion_PadLimit${PadLimit}-${FineTune}_29.pkl" --num_samples 1
@@ -40,6 +40,8 @@ FineTuneSub=$((FineTune-1))
 
 # python eval.py --name "BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTune}.pkl" --num_samples 1
 
-python eval_RL.py --name "BackwardUnifiedContinuousRL_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_NoPadLimit-${FineTune}.pkl" --pad_limit -1 --num_samples 1
+# python eval_RL.py --name "BackwardUnifiedContinuousRL_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_NoPadLimit-${FineTune}.pkl" --pad_limit -1 --num_samples 2 --batch_size 20
 
-# python eval.py --name "BackwardUnifiedContinuous_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_NoPadLimit-${FineTune}.pkl" --pad_limit -1 --num_samples 2
+# python eval.py --name "BackwardUnifiedContinuous_NoPadLimit_T100-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_NoPadLimit-${FineTune}.pkl" --pad_limit -1 --num_samples 1 --record_attns 10 --batch_size 64
+
+python eval.py --name "BackwardUnifiedContinuous_NoPadLimit_T100_100Samples-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_NoPadLimit-${FineTune}.pkl" --pad_limit -1 --num_samples 5 --batch_size 16 --record_attns 1

@@ -23,7 +23,7 @@ conda activate deepchem
 cd ~/Retro-Diffusion
 
 PadLimit=20
-FineTune=0
+FineTune=1
 FineTuneSub=$((FineTune-1))
 
 # if (($FineTune == 0)); then

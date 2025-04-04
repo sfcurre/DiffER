@@ -7,10 +7,11 @@ from torch.utils.data import DataLoader
 from source.data import RSmilesUspto50
 from source.tokeniser import load_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
+from source.conditional_model_attn_eval import ConditionalModelAttnEval
 from source.discrete_diffusion import UnifiedDiscreteDiffusion
 from source.trainer import UnifiedTrainer
 from source.sampler import UnifiedSampler
-from source.utils import move_batch_to_gpu
+from source.utils import move_batch_to_gpu, repeat_batch
 
 import json
 
@@ -56,7 +57,10 @@ def main(name, config, load, num_samples, test, pred_lengths):
                                         collate_fn=dataset.collate_fn)
     print("Finished datasets.")
 
-    model = ConditionalModel(
+    model_type = ConditionalModel
+    if args.record_attns:
+        model_type = ConditionalModelAttnEval
+    model = model_type(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
         d_model=config['model']['d_model'],
@@ -95,9 +99,9 @@ def main(name, config, load, num_samples, test, pred_lengths):
     print(f'Evaluating {name}...')
     model.eval()
   
-    torch.manual_seed(1998) 
-    with torch.no_grad():
-        trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
+    # torch.manual_seed(1998) 
+    # with torch.no_grad():
+    #     trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
 
     torch.manual_seed(1998) 
     all_targets = {}
@@ -105,23 +109,25 @@ def main(name, config, load, num_samples, test, pred_lengths):
     for i, batch in enumerate(dataloaders[DATASET]):
         
         targets = {}
-        for target, source in zip(batch['decoder_smiles'], batch['encoder_smiles']):
+        for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
         
         if use_gpu:
             move_batch_to_gpu(batch)
 
+        if num_samples > 1:
+            repeat_batch(batch, num_samples)
+
         sampled_mols, _ = sampler.sample(batch,
                                           model,
                                           verbose=False,
                                           pred_lengths=pred_lengths,
-                                          clean=False,
-                                          num_samples=num_samples)
+                                          clean=False)
         for j, smi in enumerate(sampled_mols):
             targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
         if i < args.record_attns:
-            sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,
+            sampled_mols, _, in_attns, out_attns = sampler.sample(batch,
                                                                    model,
                                                                    verbose=False,
                                                                    pred_lengths=pred_lengths,
@@ -131,8 +137,9 @@ def main(name, config, load, num_samples, test, pred_lengths):
                 attns[batch['encoder_smiles'][j]] = smi_data = {}
                 smi_data['target'] = batch['decoder_smiles'][j]
                 smi_data['sample'] = smi
-                smi_data['in_attns'] = {k: v[:, i] for k, v in in_attns.items()}
-                smi_data['out_attns'] = {t: {k: v[:, i] for k, v in out_t} for t, out_t in out_attns}
+                smi_data['in_attns'] = {k: v[j] for k, v in in_attns.items()}
+                smi_data['x_t'] = {t: k[j] for t, (k, _) in out_attns.items()}
+                smi_data['out_attns'] = {t: {k: v[j] for k, v in out_t.items()} for t, (_, out_t) in out_attns.items()}
 
         print(f'Batch {i} complete.')
         
@@ -142,11 +149,11 @@ def main(name, config, load, num_samples, test, pred_lengths):
             else:
                 all_targets[source] = targets[source]
         
-    with open(f"out/samples/{name}_samples.json", 'w') as fp:
-        json.dump(all_targets, fp)
+        with open(f"out/samples/{name}_samples.json", 'w') as fp:
+            json.dump(all_targets, fp)
 
-    if args.record_attns:
-        torch.save(attns, f"out/samples/attns/{name}_attns.json")
+        if i < args.record_attns:
+            torch.save(attns, f"out/samples/attns/{name}_attns.json")
 
     print('Evaluation complete.')
 
@@ -161,6 +168,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
     parser.add_argument("--pad_limit", type=int, default=None)
+    parser.add_argument("--batch_size", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
@@ -169,5 +177,8 @@ if __name__ == '__main__':
 
     if args.pad_limit is not None:
         config['data']['pad_limit'] = args.pad_limit
+
+    if args.batch_size is not None:
+        config['training']['batch_size'] = args.batch_size
     
     main(args.name, config, args.load, args.num_samples, args.test, not args.use_true_lengths)
