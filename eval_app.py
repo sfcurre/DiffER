@@ -133,7 +133,7 @@ if not os.path.exists('st_data.tmp'):
         data['SourceSmiles'].append(canon_source)
         target = samples[source]['target']
         smis = samples[source]['samples']
-        mol = Chem.MolFromSmiles(target)
+        mol = target_mol = Chem.MolFromSmiles(target.rstrip('?'))
         canon_target = Chem.MolToSmiles(mol)
 
         # mol_descriptors = Descriptors.CalcMolDescriptors(mol)
@@ -174,7 +174,6 @@ if not os.path.exists('st_data.tmp'):
         data['P2RSimilarity'].append(SequenceMatcher(None, canon_source, canon_target).ratio()) 
 
         source_mol = Chem.MolFromSmiles(source)
-        target_mol = Chem.MolFromSmiles(target)
         change_in_num_rings = rdMolDescriptors.CalcNumRings(source_mol) - rdMolDescriptors.CalcNumRings(target_mol)
         data['RingForming'].append(change_in_num_rings > 0)
         data['RingOpening'].append(change_in_num_rings < 0)
@@ -504,7 +503,7 @@ if st.button('Generate'):
         sm = Chem.MolFromSmiles(source)
         AllChem.Compute2DCoords(sm)
         
-        target = sub_samples[source]['target']
+        target = sub_samples[source]['target'].rstrip('?')
         tm = Chem.MolFromSmiles(target)
         AllChem.Compute2DCoords(tm)
         canon_target = Chem.MolToSmiles(tm)

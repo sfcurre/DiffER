@@ -1,18 +1,16 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import altair as alt
-import sys, json, zlib, os, random, pickle
+import os, pickle, re
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import seaborn as sns
 import torch
 
-from difflib import SequenceMatcher
-from collections import defaultdict, Counter
-from altair import datum
+from streamlit_image_select import image_select
 
-from rdkit.Chem import Descriptors, Lipinski, rdMolDescriptors, Crippen, AllChem, Draw
+from rdkit.Chem import rdMolDescriptors, AllChem, Draw
+from rdkit.Chem.Draw import rdMolDraw2D, SimilarityMaps
+
 from rdkit import Chem, RDLogger
 RDLogger.DisableLog("rdApp.*")
 
@@ -42,58 +40,49 @@ def clear_tmp_data():
 st.title('Categorical Diffusion for Retrosynthesis - Attention Evaluation')
 """Sean Current"""
 
-DATAFILE = st.file_uploader('Upload JSON source/target/samples attention dataset:', on_change=clear_tmp_data, accept_multiple_files=False)
-if not DATAFILE:
-    RECOVERED = st.checkbox('Recover previous session?', disabled=bool(DATAFILE))
-    if not RECOVERED:
-        st.stop()
+# DATAFILE = st.file_uploader('Upload JSON source/target/samples attention dataset:', on_change=clear_tmp_data, accept_multiple_files=False)
+DATAFILE = 'BackwardUnifiedContinuous_NoPadLimit_T100_100Samples-2_attns.json'
 
-if not os.path.exists('st_attn_data.tmp'):
-    data = torch.load(DATAFILE)
+data = torch.load(DATAFILE)
 
-    loading_bar = st.progress(0.0, "Loading tokeniser...")
+loading_bar = st.progress(0.0, "Loading tokeniser...")
+
+from source.tokeniser import load_tokeniser_from_rsmiles
+print("Building tokeniser...")
+tokeniser = load_tokeniser_from_rsmiles("data/USPTO_50K_PtoR_aug20")
+print(f"Finished tokeniser with {len(tokeniser)} tokens.")
+
+with open('data/uspto_50.pickle', 'rb') as fp:
+    rxn_type_df = pickle.load(fp)
+    rxn_type_df['products_smiles'] = rxn_type_df['products_mol'].map(Chem.MolToSmiles)
+
+    rxn_type_df['reaction_type'] = rxn_type_df['reaction_type'].map(rxn_types.get)
+    rxn_type_map = dict(zip(rxn_type_df['products_smiles'], rxn_type_df['reaction_type']))
+
+descriptors = ['MolWt', 'NumAromaticRings', 'NumAliphaticRings', 'RingCount', 'NumHeteroatoms']
+for i, source in enumerate(data):
+    if (i+1) % 10 == 0:
+        loading_bar.progress((i+1) / len(data), f"Calculating sample statistics... {i+1}/{len(data)}")
+    canon_source = canonicalize(source)
+    target = data[source]['target']
+    sample = data[source]['sample']
+    mol = Chem.MolFromSmiles(target)
     
-    from source.tokeniser import load_tokeniser_from_rsmiles
-    print("Building tokeniser...")
-    tokeniser = load_tokeniser_from_rsmiles("data/USPTO_50K_PtoR_aug20")
-    print(f"Finished tokeniser with {len(tokeniser)} tokens.")
+    data[source]['ReactionType'] = rxn_type_map[canon_source]
 
-    with open('data/uspto_50.pickle', 'rb') as fp:
-        rxn_type_df = pickle.load(fp)
-        rxn_type_df['products_smiles'] = rxn_type_df['products_mol'].map(Chem.MolToSmiles)
+    change_in_num_rings = rdMolDescriptors.CalcNumRings(Chem.MolFromSmiles(source)) - rdMolDescriptors.CalcNumRings(Chem.MolFromSmiles(target))
+    data[source]['RingForming'] = change_in_num_rings > 0
+    data[source]['RingOpening'] = change_in_num_rings < 0
+    data[source]['NonRing'] = change_in_num_rings == 0
 
-        rxn_type_df['reaction_type'] = rxn_type_df['reaction_type'].map(rxn_types.get)
-        rxn_type_map = dict(zip(rxn_type_df['products_smiles'], rxn_type_df['reaction_type']))
+    synthesis = '.' in target
+    data[source]['Synthesis'] = synthesis
+    data[source]['Accurate'] = canonicalize(target) == canonicalize(sample)
+    data[source]['Valid'] = canonicalize(sample) is not None
 
-    descriptors = ['MolWt', 'NumAromaticRings', 'NumAliphaticRings', 'RingCount', 'NumHeteroatoms']
-    for i, source in enumerate(data):
-        if (i+1) % 10 == 0:
-            loading_bar.progress((i+1) / len(data), f"Calculating sample statistics... {i+1}/{len(data)}")
-        canon_source = canonicalize(source)
-        target = data[source]['target']
-        sample = data[source]['sample']
-        mol = Chem.MolFromSmiles(target)
-        
-        data[source]['ReactionType'] = rxn_type_map[canon_source]
+torch.save(data, 'st_attn_data.tmp')
 
-        change_in_num_rings = rdMolDescriptors.CalcNumRings(Chem.MolFromSmiles(source)) - rdMolDescriptors.CalcNumRings(Chem.MolFromSmiles(target))
-        data[source]['RingForming'] = change_in_num_rings > 0
-        data[source]['RingOpening'] = change_in_num_rings < 0
-        data[source]['NonRing'] = change_in_num_rings == 0
-
-        synthesis = '.' in target
-        data[source]['Synthesis'] = synthesis
-        data[source]['Accurate'] = canonicalize(target) == canonicalize(sample)
-        data[source]['Valid'] = canonicalize(sample) is not None
-
-    torch.save(data, 'st_attn_data.tmp')
-
-    loading_bar.empty()
-
-else:
-    # Load DataFrame
-    data = torch.load('st_attn_data.tmp')
-
+loading_bar.empty()
 
 st.header('Sampling Statistics')
 
@@ -109,7 +98,6 @@ col2.metric("Has Accurate Sample", f"{np.mean([data[source]['Accurate'] for sour
 
 st.write('Sample reaction statistics:')
 
-has_rank = data[data['RankOfAccurate'] != 0]
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("RingForming", f"{np.mean([data[source]['RingForming'] for source in data]):2.3%}")
 col2.metric("RingOpening", f"{np.mean([data[source]['RingOpening'] for source in data]):2.3%}")
@@ -123,7 +111,7 @@ col_names = ['Reaction Type', 'Validity', 'Accuracy', 'Support']
 table = []
 for rxn_type in rxn_types.values():
     row=[]
-    has_rxn_type = [source for source in data if source['ReactionType'] == rxn_type]
+    has_rxn_type = [source for source in data if data[source]['ReactionType'] == rxn_type]
     row.append(rxn_type)
     row.append(f"{np.mean([data[source]['Valid'] for source in has_rxn_type]):2.3%}")
     row.append(f"{np.mean([data[source]['Accurate'] for source in has_rxn_type]):2.3%}")
@@ -134,63 +122,164 @@ st.dataframe(pd.DataFrame(table, columns=col_names).sort_values(by='Support', as
 
 st.header('Attention Visualization:')
 
-st.write("Filter reactions:")
-filters = []
-st.write("Not implemented!")
-filtered_data = data
 
-st.write("Select reaction:")
-reaction = None
+st.write("Select reaction to view:")
+slice_id = st.selectbox('Reaction slice:', list(range(len(data) // 4)), index=0, key='slice')
 
-if st.button('Generate'):
-    sources = sorted(np.random.choice(list(filtered_data), size=max(5, len(filtered_data)), replace=False))
-    for source in sources:
-        sm = Chem.MolFromSmiles(source)
-        AllChem.Compute2DCoords(sm)
-        
-        target = data[source]['target']
-        tm = Chem.MolFromSmiles(target)
-        AllChem.Compute2DCoords(tm)
+sorted_sources = sorted(data)
+sources = sorted_sources[slice_id:slice_id+4]
 
-        sample = data[source]['sample']
-        pm = Chem.MolFromSmiles(target)
-        AllChem.Compute2DCoords(pm)
-        
-        mols, legs = [], []
-        mols.append(sm)
-        legs.append('Source')
-        mols.append(tm)
-        legs.append('Target')
-        mols.append(pm)
-        legs.append('Sample')
+source_mols = []
+target_mols = []
+sample_mols = []
+for source in sources:
+    sm = Chem.MolFromSmiles(source)
+    AllChem.Compute2DCoords(sm)
+    source_mols.append(sm)
 
-        img=Draw.MolsToGridImage(mols, molsPerRow=len(mols),subImgSize=(300,300),legends=legs, returnPNG=True)
-        st.image(img)
-        if st.button('Use Reaction?'):
-            reaction = source
+    target = data[source]['target']
+    tm = Chem.MolFromSmiles(target)
+    AllChem.Compute2DCoords(tm)
+    target_mols.append(tm)
 
-if reaction is None:
+    sample = canonicalize(data[source]['sample'])
+    if sample is None:
+        pm = Chem.Mol()
+    else:
+        pm = Chem.MolFromSmiles(sample)
+    AllChem.Compute2DCoords(pm)
+    sample_mols.append(pm)
+
+legends=list(map(str, range(0, len(source_mols))))
+st.write('Source:')
+img=Draw.MolsToGridImage(source_mols, molsPerRow=len(source_mols),subImgSize=(300,300),legends=legends, returnPNG=True)
+st.image(img)
+st.write('Target:')
+img=Draw.MolsToGridImage(target_mols, molsPerRow=len(source_mols),subImgSize=(300,300),legends=legends, returnPNG=True)
+st.image(img)
+st.write('Sample:')
+img=Draw.MolsToGridImage(sample_mols, molsPerRow=len(source_mols),subImgSize=(300,300),legends=legends, returnPNG=True)
+st.image(img)
+
+reaction_id = st.selectbox('Select reaction:', list(range(0, len(source_mols))), index=0, key='reaction')
+if reaction_id is None:
     st.stop()
 
-st.write('Here are the encoder attention maps:')
-attns = data[reaction]['in_attns']
+reaction = sources[reaction_id]
+tokenised_reaction = ['<L>'] + tokeniser.tokenise([reaction])['original_tokens'][0]
 
-for m, attn_block in attns.items():
-    fig = plt.figure(figsize=(10, 4))
-    sns.heatmap(attn_block, cmap='viridis')
-    plt.xticks(np.arange(len(reaction)), reaction)
-    plt.title(f'Layer {m}')
-    st.pyplot(fig)
+if st.checkbox('View encoder attention maps?'):
+    st.write('Here are the encoder attention maps:')
+    attns = data[reaction]['in_attns']
 
-st.write('Here are the decoder attention maps:')
-step = st.selectbox('Diffusion step:', [1, 10, 50, 100, 200], index=None, key='step', placeholder=1)
-attns = data[reaction['out_attns']][step]
-target = data[reaction]['target']
+    for m, attn_block in attns.items():
+        x_ticks_i = {
+            0: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
+            1: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
+            2: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction)
+        }
+        y_ticks_i = {
+            0: (np.arange(len(tokenised_reaction)) + 0.5, tokenised_reaction),
+            1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
+            2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
+        }
+        for i in range(3):
+            fig = plt.figure(figsize=(10, 10))
+            sns.heatmap(attn_block.mean(axis=i)[:len(tokenised_reaction), :len(tokenised_reaction)], cmap='viridis', square=True)
+            plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.title(f'Layer {m}')
+            st.pyplot(fig)
 
-for m, (smiles, attn_block) in attns.items():
-    fig = plt.figure(figsize=(10, 4))
-    sns.heatmap(attn_block, cmap='viridis')
-    plt.xticks(np.arange(len(smiles)), smiles)
-    plt.title(f'Layer {m}')
-    st.pyplot(fig)
+        avg_source_attn = np.mean(attn_block.numpy(), axis=(0,1))
+        attn_by_token = zip(tokenised_reaction, avg_source_attn)
+        mol = Chem.MolFromSmiles(reaction)
+        atom_colors = {}
+        atom_finder = re.compile(r"(Cl?|Br?|[NOSPFIbcnosp*]|\[[^]]+\])", re.X)
+        atoms = atom_finder.findall(reaction)
+        first = next(attn_by_token)
+        atom_ids = []
+        atom_weights = []
+        for atom, atom_str in zip(mol.GetAtoms(), atoms):
+            while first[0] != atom_str:
+                first = next(attn_by_token)
+            atom_ids.append(atom.GetIdx())
+            atom_weights.append(float(first[1]))            
+        
+        max_weight = max(atom_weights)
+        atom_weights = [(w / max_weight) ** 2 for w in atom_weights]
+
+        d = rdMolDraw2D.MolDraw2DCairo(500, 500)
+        SimilarityMaps.GetSimilarityMapFromWeights(mol, atom_weights, draw2d=d)
+        st.image(d.GetDrawingText())
+        
+if st.checkbox('View decoder multihead attention maps?'):
+    st.write('Here are the decoder multihead attention maps:')
+    mh_step = st.selectbox('Diffusion step:', [1, 10, 50, 100, 150, 199], index=0, key='mh_step')
+    if mh_step is None:
+        st.stop()
+
+    attns = data[reaction]['out_attns'][mh_step]
+    smiles = data[reaction]['x_t'][mh_step]
+    tokenised_smiles = tokeniser.tokenise([smiles])['original_tokens'][0]
+
+    cutoff_len = len(tokenised_smiles) - smiles.count('?') + 5
+    tokenised_smiles = tokenised_smiles[:cutoff_len]
+
+    for m, attn_block in attns.items():
+        if not m.startswith('m'):
+            continue
+        
+        x_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            2: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles)
+        }
+        y_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
+            2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
+        }
+        for i in range(3):
+            fig = plt.figure(figsize=(10, 10))
+            sns.heatmap(attn_block.mean(axis=i)[:cutoff_len, :cutoff_len], cmap='viridis', square=True)
+            plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.title(f'Layer {m}')
+            st.pyplot(fig)
+
+if st.checkbox('View decoder self attention maps?'):
+    st.write('Here are the decoder self attention maps:')
+    s_step = st.selectbox('Diffusion step:', [1, 10, 50, 100, 150, 199], index=0, key='s_step')
+    if s_step is None:
+        st.stop()
+
+    attns = data[reaction]['out_attns'][s_step]
+    smiles = data[reaction]['x_t'][s_step]
+    tokenised_smiles = tokeniser.tokenise([smiles])['original_tokens'][0]
+
+    cutoff_len = len(tokenised_smiles) - smiles.count('?') + 5
+    tokenised_smiles = tokenised_smiles[:cutoff_len]
+
+    for m, attn_block in attns.items():
+        if not m.startswith('s'):
+            continue
+        
+        x_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            2: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles)
+        }
+        y_ticks_i = {
+            0: (np.arange(len(tokenised_smiles)) + 0.5, tokenised_smiles),
+            1: (np.arange(len(attn_block)) + 0.5, range(len(attn_block))),
+            2: (np.arange(len(attn_block)) + 0.5, range(len(attn_block)))
+        }
+        for i in range(3):
+            fig = plt.figure(figsize=(10, 10))
+            sns.heatmap(attn_block.mean(axis=i)[:cutoff_len, :cutoff_len], cmap='viridis', square=True)
+            plt.xticks(*x_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.yticks(*y_ticks_i[i], fontsize=8, rotation='horizontal')
+            plt.title(f'Layer {m}')
+            st.pyplot(fig)
 
