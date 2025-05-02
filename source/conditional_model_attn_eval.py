@@ -39,10 +39,10 @@ class ConditionalModelAttnEval(ConditionalModel):
             m.multihead_attn.register_forward_hook(partial(self.save_output_decoder, label='m' + str(i)))
 
     def save_output_encoder(self, m, i, o, label='0'):
-        self.encoder_attn_outputs[str(m)] = o[1].cpu().detach()
+        self.encoder_attn_outputs[label] = o[1].cpu().detach()
 
     def save_output_decoder(self, m, i, o, label='0'):
-        self.decoder_attn_outputs[str(m)] = o[1].cpu().detach()
+        self.decoder_attn_outputs[label] = o[1].cpu().detach()
     
     def get_attn(self, mode='encoder'):
         if mode == 'encoder':

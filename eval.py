@@ -90,8 +90,8 @@ def main(name, config, load, num_samples, test, pred_lengths):
     
     trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu)    
     
-    if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
-        os.remove(f'out/metrics/{name}_metrics_log.txt')
+    # if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
+    #     os.remove(f'out/metrics/{name}_metrics_log.txt')
 
     # if not os.path.exists(f'out/samples/{name}/'):
     #     os.mkdir(f'out/samples/{name}/')
@@ -103,10 +103,13 @@ def main(name, config, load, num_samples, test, pred_lengths):
     # with torch.no_grad():
     #     trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
 
-    torch.manual_seed(1998) 
+    torch.manual_seed(1998)
     all_targets = {}
     attns = {}
     for i, batch in enumerate(dataloaders[DATASET]):
+
+        if i == args.batch_limit:
+            break
         
         targets = {}
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
@@ -168,7 +171,9 @@ if __name__ == '__main__':
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
     parser.add_argument("--pad_limit", type=int, default=None)
+    parser.add_argument("--batch_limit", type=int, default=-1)
     parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--num_timesteps", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
@@ -180,5 +185,8 @@ if __name__ == '__main__':
 
     if args.batch_size is not None:
         config['training']['batch_size'] = args.batch_size
+
+    if args.num_timesteps is not None:
+        config['model']['num_timesteps'] = args.num_timesteps
     
     main(args.name, config, args.load, args.num_samples, args.test, not args.use_true_lengths)

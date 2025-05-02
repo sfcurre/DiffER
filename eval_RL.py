@@ -71,21 +71,8 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
     state_dict = torch.load(load)
     model.load_state_dict(state_dict)
 
-    if guidance_type == 'particle':
-        guidance_model = ParticleGuidanceModel(model)
-    elif guidance_type == 'memory':
-        guidance_model = GuidanceModel(model)
-    elif guidance_type == 'forward':
-        guidance_model = model.clone()
-        guidance_model.load_state_dict(torch.load(forward))
-
     if use_gpu:
         model = model.cuda()
-        guidance_model = guidance_model.cuda()
- 
-    optimizer = optim.Adam(guidance_model.parameters(),
-                           lr=config['training']['learning_rate'],
-                           weight_decay=config['training']['weight_decay'])
     
     diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * (not config['model']['continuous']),
                                         num_classes=len(tokeniser),
@@ -104,11 +91,38 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
     print(f'Evaluating {name}...')
     model.eval()
 
+    if guidance_type == 'forward':
+        guidance_model = ConditionalModel(
+        tokeniser=tokeniser,
+        max_seq_len=config['model']['max_seq_len'],
+        d_model=config['model']['d_model'],
+        num_layers=config['model']['num_layers'],
+        num_heads=config['model']['num_heads'],
+        d_feedforward=config['model']['d_feedforward'],
+        activation=config['model']['activation'],
+        dropout=config['model']['dropout'])
+        guidance_model.load_state_dict(torch.load(forward))
+
     torch.manual_seed(1998) 
     all_targets = {}
     attns = {}
     for i, batch in enumerate(dataloaders[DATASET]):
+
+        if i == args.batch_limit:
+            break
+
+        if guidance_type == 'particle':
+            guidance_model = ParticleGuidanceModel(model)
+        elif guidance_type == 'memory':
+            guidance_model = GuidanceModel(model)
         
+        if use_gpu:
+            guidance_model = guidance_model.cuda()
+ 
+        optimizer = optim.Adam(guidance_model.parameters(),
+                           lr=config['training']['learning_rate'],
+                           weight_decay=config['training']['weight_decay'])
+
         targets = {}
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
@@ -173,6 +187,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
     parser.add_argument("--pad_limit", type=int, default=None)
+    parser.add_argument("--batch_limit", type=int, default=-1)
     parser.add_argument("--memory", action='store_true')
     parser.add_argument("--forward", type=str, default='')
     parser.add_argument("--batch_size", type=int, default=None)

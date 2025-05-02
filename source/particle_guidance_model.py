@@ -54,7 +54,6 @@ class ParticleGuidanceModel(nn.Module):
 
         distance = model_output.unsqueeze(1) - model_output.unsqueeze(0)
         output = self.output_fc(distance).squeeze(-1)
-
         return output
 
     def embed_log_onehot(self, onehot_input, t=None):
@@ -84,7 +83,7 @@ class ParticleGuidanceModel(nn.Module):
         for m1 in sampled_mols:
             scores.append([])
             for m2 in sampled_mols:
-                if m1 == m2:
+                if m1 == m2 or m1 is None:
                     scores[-1].append(0)
                 else:
                     scores[-1].append(1)
@@ -106,5 +105,5 @@ class ParticleGuidanceModel(nn.Module):
         return valid_scores, distance_scores
     
     def get_loss(self, output, scores):
-        classifier_loss = F.binary_cross_entropy_with_logits(output, scores)
+        classifier_loss = F.binary_cross_entropy(output, scores)
         return classifier_loss

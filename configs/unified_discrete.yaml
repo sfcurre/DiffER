@@ -14,13 +14,14 @@ model:
   dropout: 0.1
 
   # loss parameters
-  length_loss: 'cross_entropy'
+  length_loss: ['cross_entropy']
+  add_unk: False
   coeff_ce: 1.0
   coeff_vlb: 1.0
 
   #diffusion parameters
   continuous: False
-  num_timesteps: 200
+  num_timesteps: 100
   min_time: 0.01
   noise_schedule: 'loglinear'
   noise_schedule_args: {}

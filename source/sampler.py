@@ -29,7 +29,7 @@ class UnifiedSampler(nn.Module):
         self.update_Lt = False
         
     def get_lengths_from_padding(self, pad_mask):
-        lengths = len(pad_mask) - pad_mask.sum(0).unsqueeze(-1)
+        lengths = pad_mask.shape[1] - pad_mask.sum(1).unsqueeze(-1)
         return lengths.squeeze()
 
     def get_length_mask(self, lengths):
@@ -59,6 +59,7 @@ class UnifiedSampler(nn.Module):
         else:
             lengths = self.get_lengths_from_padding(batch['x_mask'])
 
+        lengths = torch.clamp(lengths, 1, self.max_seq_len)
         x_t, length_mask = self.init_noise(lengths)
     
         if verbose:
@@ -68,7 +69,11 @@ class UnifiedSampler(nn.Module):
             in_attns = model.get_attn('encoder')
             out_attns = {}
 
-        ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
+        if self.diffuser.num_steps == 0:
+            ts = np.concatenate((np.linspace(1.0, self.min_time, self.num_timesteps), np.array([0])))
+        else:
+            ts = np.arange(self.num_timesteps, -1, -1, dtype=np.float32)
+        
         device = x_t.device
 
         for idx, t in enumerate(ts[0:-1]):
@@ -90,7 +95,7 @@ class UnifiedSampler(nn.Module):
             prob_s[s==0] = fprob_t[s==0]
 
             x_s = sample_categorical(prob_s)
-            x_s[batch['x_mask']] = x_t[batch['x_mask']]
+            x_s[length_mask] = x_t[length_mask]
             x_t = F.one_hot(x_s, len(self.tokeniser)).to(torch.float)
 
             if verbose and ((idx < 10) or (idx % 20 == 0)):

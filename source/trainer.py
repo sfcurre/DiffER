@@ -71,8 +71,11 @@ class UnifiedTrainer:
             print(log + '\n', file=fp)
 
     def sample_time(self, size, device):
-        return torch.rand((size,), device=device) * (1.0 - self.min_time) + self.min_time
-        
+        if self.diffuser.num_steps == 0:
+            return torch.rand((size,), device=device) * (1.0 - self.min_time) + self.min_time
+        else:
+            return torch.randint(1, self.diffuser.num_steps + 1, (size,), device=device).float()
+
     def train_step(self, batch):
         if self.use_gpu:
             move_batch_to_gpu(batch)
@@ -141,16 +144,19 @@ class UnifiedTrainer:
         pred_lengths = F.log_softmax(pred_lengths)
         input_length = batch_input['y_mask'].shape[1] - batch_input['y_mask'].sum(1).unsqueeze(-1)
         output_length = batch_input['x_mask'].shape[1] - batch_input['x_mask'].sum(1).unsqueeze(-1)
+        
         # leverage the fact that the change in length will be small, so large indices can be used for negative length change
         length_target = ((output_length - input_length) % self.sampler.max_seq_len).to(torch.int64)
-        if self.length_loss == 'cross_entropy':
+        
+        if 'cross_entropy' in self.length_loss:
             length_loss = -pred_lengths.gather(dim=-1, index=length_target)
-        elif self.length_loss == 'focal':
+        elif 'focal' in self.length_loss:
             gamma = 0.25
             length_loss = -pred_lengths.gather(dim=-1, index=length_target)
             length_dist = torch.exp(-length_loss)
             focal_mod = (1 - length_dist) ** gamma
             length_loss *= focal_mod
+        
         return length_loss.mean()
 
     def _calc_token_acc(self, batch_input, token_output):

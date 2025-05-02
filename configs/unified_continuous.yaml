@@ -14,7 +14,8 @@ model:
   dropout: 0.1
 
   # loss parameters
-  length_loss: 'cross_entropy'
+  length_loss: ['cross_entropy']
+  add_unk: False
   coeff_ce: 1.0
   coeff_vlb: 1.0
 
