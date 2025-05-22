@@ -6,17 +6,34 @@ import sys, json, zlib, os, random, pickle
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
+import io, base64, PIL
 
-from scipy.stats import pointbiserialr
+from scipy.stats import pointbiserialr, pearsonr, linregress
+from scipy.stats.contingency import crosstab, odds_ratio, chi2_contingency
+import scipy.stats as stats
+from sklearn.metrics import matthews_corrcoef, jaccard_score, balanced_accuracy_score
 from difflib import SequenceMatcher
 from collections import defaultdict, Counter
 from altair import datum
+from nltk import edit_distance
 
-from rdkit.Chem import rdMolDescriptors, AllChem, Draw
+from rdkit.Chem import rdMolDescriptors, AllChem, Draw, rdFMCS
 from rdkit import Chem, RDLogger, DataStructs
 drawOptions = Draw.rdMolDraw2D.MolDrawOptions()
 drawOptions.prepareMolsBeforeDrawing = False
+# drawOptions.fontFile = 'NotoSerif-VariableFont_wdth,wght.ttf'
+# drawOptions.legendFontSize = 40
+AllChem.ConstrainedDepictionParams.alignOnly=True
+
 from rdkit.Chem.Draw import IPythonConsole
+IPythonConsole.drawOptions.addAtomIndices = False
+IPythonConsole.drawOptions.useBWAtomPalette()
+IPythonConsole.drawOptions.continuousHighlight = False
+IPythonConsole.drawOptions.circleAtoms = False
+IPythonConsole.drawOptions.setHighlightColour((.9,0,0,.8))
+IPythonConsole.drawOptions.legendFontSize = 24
+IPythonConsole.molSize = 300,300
+# IPythonConsole.drawOptions.fontFile = 'NotoSans-Medium.ttf'
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -30,6 +47,42 @@ rxn_types = {'<RX_1>': 'Heteroatom alkylation and arylation',
                      '<RX_8>': 'oxidations',
                      '<RX_9>': 'functional group interconversion',
                      '<RX_10>': 'functional group addition'}
+
+import streamlit as st
+import json
+
+def download_upload_session():
+    # 1. Download Settings Button
+    col1, col2 = st.columns([6, 5])
+    settings_to_download = {k: v for k, v in st.session_state.items() if k in ['samples', 'data', 'files']}
+
+    button_download = col1.download_button(label="Download Session",
+                                           data=json.dumps(settings_to_download),
+                                           file_name=f"session.json",
+                                           help="Click to Download Current Session")
+
+    # 2. Select Settings to be uploaded
+    uploaded_file = st.file_uploader(label="Select the Session File to be uploaded",
+                                     help="Select the Session File (Downloaded in a previous run) that you want"
+                                          " to be uploaded and then load (by clicking 'load Session' above)")
+    if uploaded_file is not None:
+        uploaded_settings = json.load(uploaded_file)
+    else:
+        return False
+
+    # 3. Apply Settings
+    def upload_json_settings(json_settings):
+        """Set session state values to what specified in the json_settings."""
+        for k in json_settings.keys():
+            st.session_state[k] = json_settings[k]
+        
+    button_apply_settings = col2.button(label="Load Session",
+                                        on_click=upload_json_settings,
+                                        args=(uploaded_settings,),
+                                        help="Click to Load the Session of the Uploaded file.\\\n"
+                                             "Please start by uploading a Session File below")
+    return True
+
 
 def wiener_index(m):
     res = 0
@@ -64,49 +117,75 @@ def get_tokenised_length(tokeniser, smiles):
     smiles = smiles.replace('?', '')
     return len(tokeniser.tokenise([smiles])['original_tokens'][0])
 
-def rating_func(smi, canon_source, pred_confidence, length_confidence, num_pad):
-    # rating = 20 - (len(smi) - len(canon_source))
-    rating = 1 #length_confidence
-    return round(rating, 2)
+def calc_topk_interval(p, n):
+    z = stats.norm.ppf(1 - (1 - .95) / 2)
+    pm = z * np.sqrt(p * (1 - p) / n)
+    return pm
 
-st.title('Categorical Diffusion for Retrosynthesis - Evaluation')
-"""Sean Current"""
+def find_mol_differences(sm, tm, mols):
+    mcs = rdFMCS.FindMCS([sm, tm, *mols])
+    mcs_mol = Chem.MolFromSmarts(mcs.smartsString)
+    AllChem.Compute2DCoords(mcs_mol)
 
-DATAFILE = st.file_uploader('Upload JSON source/target/samples dataset:', on_change=clear_tmp_data, accept_multiple_files=True)
-if not DATAFILE:
-    RECOVERED = st.checkbox('Recover previous session?', disabled=bool(DATAFILE))
-    if not RECOVERED:
-        st.stop()
+    mol_atoms = []
+    mcs_ = rdFMCS.FindMCS([sm, tm])
+    mcs_mol_ = Chem.MolFromSmarts(mcs_.smartsString)
+    # AllChem.GenerateDepictionMatching2DStructure(sm, mcs_mol)
+    # AllChem.GenerateDepictionMatching2DStructure(tm, mcs_mol)
+    AllChem.Compute2DCoords(sm)
+    AllChem.Compute2DCoords(tm)
 
-if not os.path.exists('st_samples.tmp'):
-    if isinstance(DATAFILE, str):
-        DATAFILE = [DATAFILE]
+    sm_match = sm.GetSubstructMatch(mcs_mol_)
+    atoms = []
+    for atom in sm.GetAtoms():
+        if atom.GetIdx() not in sm_match:
+            atoms.append(atom.GetIdx())
+    mol_atoms.append(atoms)
+
+    tm_match = tm.GetSubstructMatch(mcs_mol_)
+    atoms = []
+    for atom in tm.GetAtoms():
+        if atom.GetIdx() not in tm_match:
+            atoms.append(atom.GetIdx())
+    mol_atoms.append(atoms)
+
+    for mol in mols:
+        # AllChem.GenerateDepictionMatching2DStructure(mol, mcs_mol)
+        AllChem.Compute2DCoords(mol)
     
+        mcs_ = rdFMCS.FindMCS([sm, mol])
+        mcs_mol_ = Chem.MolFromSmarts(mcs_.smartsString)
+        match = mol.GetSubstructMatch(mcs_mol_)
+        atoms = []
+        for atom in mol.GetAtoms():
+            if atom.GetIdx() not in match:
+                atoms.append(atom.GetIdx())
+        mol_atoms.append(atoms)
+
+    return mol_atoms
+
+def read_datafiles(datafiles):
     loading_bar = st.progress(0.0, "Loading data...")
     i = 0
     samples = {}
-    for file in DATAFILE:
+    for file in datafiles:
         sub_samples = json.load(file)
         for source in sub_samples:
             i += 1
             if i % 1000 == 0:
-                loading_bar.progress(i / (len(sub_samples) * len(DATAFILE)), f"Loading data... {i}/{len(sub_samples) * len(DATAFILE)}")
+                loading_bar.progress(i / (len(sub_samples) * len(datafiles)), f"Loading data... {i}/{len(sub_samples) * len(datafiles)}")
             canon_source = canonicalize(source)
             if canon_source in samples:
                 samples[canon_source]['samples'].extend(sub_samples[source]['samples'])
+                samples[canon_source]['edit_distance'].append(edit_distance(source, sub_samples[source]['target']))
             else:
                 samples[canon_source] = sub_samples[source]
+                samples[canon_source]['edit_distance'] = [edit_distance(source, sub_samples[source]['target'])]
 
-    with open('st_samples.tmp', 'w') as fp:
-        json.dump(samples, fp)
     loading_bar.empty()
+    return samples
 
-else:
-    with open('st_samples.tmp') as fp:
-        samples = json.load(fp)
-
-if not os.path.exists('st_data.tmp'):
-
+def process_samples(samples):
     loading_bar = st.progress(0.0, "Loading tokeniser...")
     
     from source.tokeniser import load_tokeniser_from_rsmiles
@@ -122,10 +201,6 @@ if not os.path.exists('st_data.tmp'):
         rxn_type_map = dict(zip(rxn_type_df['products_smiles'], rxn_type_df['reaction_type']))
 
     data = defaultdict(list)
-    descriptors = ['MolWt', 'NumAromaticRings', 'NumAliphaticRings', 'RingCount', 'NumHeteroatoms']
-    clean = True
-    all_reactants, all_products = set(), set()
-    reactant_collisions, product_collisions = 0, 0
     for i, source in enumerate(samples):
         if (i+1) % 10 == 0:
             loading_bar.progress((i+1) / len(samples), f"Calculating sample statistics... {i+1}/{len(samples)}")
@@ -136,20 +211,10 @@ if not os.path.exists('st_data.tmp'):
         mol = target_mol = Chem.MolFromSmiles(target.rstrip('?'))
         canon_target = Chem.MolToSmiles(mol)
 
-        # mol_descriptors = Descriptors.CalcMolDescriptors(mol)
-        # for d in descriptors:
-        #     data[d].append(mol_descriptors[d])
+        for rxn_type in rxn_types.values():
+            data[rxn_type].append(False)
         
-        # data['NumAtoms'].append(mol.GetNumAtoms())
-        # data['NumBonds'].append(mol.GetNumBonds())
-        # data['WienerIndex'].append(wiener_index(mol))
-
-        # dmat = Chem.GetDistanceMatrix(mol)
-        # data['GraphDistance'].append(dmat[dmat < 1e6].max())
-        # data['NumStereocenters'].append(rdMolDescriptors.CalcNumAtomStereoCenters(mol))
-        # data['NumBranches'].append(canon_target.count('('))
-
-        data['ReactionType'].append(rxn_type_map[canon_source])
+        data[rxn_type_map[canon_source]][-1] = True
 
         source_length = get_tokenised_length(tokeniser, source)
         target_length = get_tokenised_length(tokeniser, target)
@@ -168,16 +233,17 @@ if not os.path.exists('st_data.tmp'):
         data['MaxAccurateLengthDifference'].append(max([0, *(abs(s - target_length) for s, smi in zip(sample_lengths, smis)
                                                                 if canonicalize(smi) == canon_target)]))
 
-        # data['ShannonEntropy'].append(shannon(canon_target))
-        # compressed = zlib.compress(canon_target.encode())
-        # data['CompressionRate'] = sys.getsizeof(canon_target.encode()) / sys.getsizeof(compressed)
         data['P2RSimilarity'].append(SequenceMatcher(None, canon_source, canon_target).ratio()) 
+        data['EditDistance'].append(np.mean(samples[source]['edit_distance']))
 
         source_mol = Chem.MolFromSmiles(source)
         change_in_num_rings = rdMolDescriptors.CalcNumRings(source_mol) - rdMolDescriptors.CalcNumRings(target_mol)
         data['RingForming'].append(change_in_num_rings > 0)
         data['RingOpening'].append(change_in_num_rings < 0)
         data['NonRing'].append(change_in_num_rings == 0)
+        data['RingCount'].append(rdMolDescriptors.CalcNumRings(target_mol))
+        data['BranchCount'].append(canon_target.count('('))
+        data['NumAtoms'].append(mol.GetNumAtoms())
 
         source_fingerprints = np.array(rdMolDescriptors.GetMorganFingerprintAsBitVect(source_mol, radius=2, nBits=2024))
         target_fingerprints = np.array(rdMolDescriptors.GetMorganFingerprintAsBitVect(target_mol, radius=2, nBits=2024))
@@ -227,12 +293,9 @@ if not os.path.exists('st_data.tmp'):
                     # print(smi, mod_ranks[mod][smi])
                     ranked_choice[smi] += mod_ranks[mod][smi]
 
-        # rankings = ranked_choice
-        # rankings = rankings_by_plurality
-        # rankings = {smi: (ranked_choice[smi], rankings_by_plurality[smi]) for smi in ranked_choice}
         rankings = {smi: (rankings_by_plurality[smi], ranked_choice[smi]) for smi in ranked_choice}
         max_smis, max_smi_rating = [], (0, 0)
-        accurate_rank = 0
+        accurate_rank = 11
         for k, smi in enumerate(sorted(rankings, key = lambda s: rankings[s], reverse=True)):
 
             if smi == canon_target:
@@ -249,39 +312,53 @@ if not os.path.exists('st_data.tmp'):
         data['TargetSmiles'].append(canon_target)
         data['SampleValidity'].append(valid / len(smis))
         data['SampleAccuracy'].append(accurate / len(smis))
-        # data['SampleMaxFrag'].append(max_frag_accurate / len(smis))
         data['SampleCount'].append(len(rankings))
+        data['Generations'].append(len(smis))
         data['HasValid'].append(valid > 0)
         data['HasAccurate'].append(accurate > 0)
         data['AccuracyOfValid'].append(accurate / valid if valid != 0 else 0)
         data['MaxIsAccurate'].append([canon_target] == max_smis)
         data['MaxHasAccurate'].append(canon_target in max_smis)
         data['RankOfAccurate'].append(accurate_rank)
-
-        # source_size = Chem.MolFromSmiles(source).GetNumAtoms()
-        # target_size = Chem.MolFromSmiles(target).GetNumAtoms()
-        
-        # data['TargetSize'].append(target_size)
-        # data['SourceSize'].append(source_size)
-        # data['TargetSizeIncrease'].append(target_size - source_size)
-        
-        # avg_sample_size = np.mean(sample_sizes)
-        # data['SampleSize'].append(avg_sample_size)
-        # data['SampleSizeIncrease'].append(avg_sample_size - source_size)
-        # data['SampleSizeMinusTargetSize'].append(avg_sample_size - target_size)
-        # data['SampleSizeVariance'].append(np.std(sample_sizes))
-        
-
-    data = pd.DataFrame(data)
-    data = data.set_index('TargetSmiles')
-    data.to_pickle('st_data.tmp')
+        data['K=1'].append(accurate_rank <= 1)
+        data['K=3'].append(accurate_rank <= 3)
+        data['K=5'].append(accurate_rank <= 5)
+        data['K=10'].append(accurate_rank <= 10)
 
     loading_bar.empty()
+    data = pd.DataFrame(data)
+    return data
 
-else:
-    # Load DataFrame
-    data = pd.read_pickle('st_data.tmp')
 
+st.title('Categorical Diffusion for Retrosynthesis - Evaluation')
+"""Sean Current"""
+
+DATAFILE = st.file_uploader('Upload JSON source/target/samples dataset:', on_change=clear_tmp_data, accept_multiple_files=True)
+if DATAFILE and st.button('Read Datafiles?'):
+    samples = read_datafiles(DATAFILE)
+    data = process_samples(samples)
+    
+    st.session_state['samples'] = samples
+    st.session_state['data'] = data.to_json()
+    st.session_state['files'] = [file.name for file in DATAFILE]
+
+with st.sidebar:
+    # Create a container to put the download/upload settings at the top
+    container_upload_session_data = st.container()
+    with container_upload_session_data:
+        with st.expander(label="UPLOAD SESSION", expanded=False):
+            download_upload_session()
+
+if 'samples' not in st.session_state or 'data' not in st.session_state or 'files' not in st.session_state:
+    st.stop()
+
+samples = st.session_state['samples']
+data = pd.read_json(st.session_state['data'])
+files = st.session_state['files']
+
+st.write('Uploaded files:')
+for file in files:
+    st.write(file)
 
 st.header('Sampling Statistics')
 
@@ -289,7 +366,7 @@ st.header('Sampling Statistics')
 # col1_.metric('Single Prediction Validity', f"{data['SampleValidity'].mean():2.3%}")
 # col2_.metric('Single Prediction Accuracy', f"{data['SampleAccuracy'].mean():2.3%}")
 
-st.write(f'Sampling was run for {len(data)} molecules with {int(data["SampleCount"].mean())} samples taken for each molecule.')
+st.write(f'Sampling was run for {len(data)} molecules with {int(data["Generations"].mean())} samples taken for each molecule.')
 
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Has Valid Sample", f"{data['HasValid'].mean():2.3%}")
@@ -305,12 +382,13 @@ col2.metric("Per Sample Accuracy", f"{data['SampleAccuracy'].mean():2.3%}")
 
 st.write('Top-k accuracy:')
 
-has_rank = data[data['RankOfAccurate'] != 0]
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("k=1", f"{len(has_rank[has_rank['RankOfAccurate'] <= 1]) / len(data):2.3%}")
-col2.metric("k=3", f"{len(has_rank[has_rank['RankOfAccurate'] <= 3]) / len(data):2.3%}")
-col3.metric("k=5", f"{len(has_rank[has_rank['RankOfAccurate'] <= 5]) / len(data):2.3%}")
-col4.metric("k=10", f"{len(has_rank[has_rank['RankOfAccurate'] <= 10]) / len(data):2.3%}")
+col1, col2 = st.columns(2)#, col3, col4 = st.columns(4)
+col1.metric("k=1", f"{data['K=1'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=1'].mean(), len(data)):.2%}")
+col2.metric("k=3", f"{data['K=3'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=3'].mean(), len(data)):.2%}")
+
+col1, col2 = st.columns(2)#, col3, col4 = st.columns(4)
+col1.metric("k=5", f"{data['K=5'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=5'].mean(), len(data)):.2%}")
+col2.metric("k=10", f"{data['K=10'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=10'].mean(), len(data)):.2%}")
 
 
 st.write('Statistics on number of samples produced:')
@@ -350,44 +428,80 @@ col4.metric("Max Sample has Accurate", f"{valid_data['MaxHasAccurate'].mean():2.
 
 st.write('Top-k accuracy:')
 
-has_rank = valid_data[valid_data['RankOfAccurate'] != 0]
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("k=1", f"{len(has_rank[has_rank['RankOfAccurate'] <= 1]) / len(valid_data):2.3%}")
-col2.metric("k=3", f"{len(has_rank[has_rank['RankOfAccurate'] <= 3]) / len(valid_data):2.3%}")
-col3.metric("k=5", f"{len(has_rank[has_rank['RankOfAccurate'] <= 5]) / len(valid_data):2.3%}")
-col4.metric("k=10", f"{len(has_rank[has_rank['RankOfAccurate'] <= 10]) / len(valid_data):2.3%}")
+col1.metric("k=1", f"{valid_data['K=1'].mean():2.3%}")
+col2.metric("k=3", f"{valid_data['K=3'].mean():2.3%}")
+col3.metric("k=5", f"{valid_data['K=5'].mean():2.3%}")
+col4.metric("k=10", f"{valid_data['K=10'].mean():2.3%}")
 
 st.header('Metrics by reaction type:')
 
-col_names = ['Reaction Type', 'k=1', 'k=3', 'k=5', 'k=10', 'Support', 'AvgTargetLength', 'AvgSourceLength', 'AvgLengthIncrease', 'AvgSampleLengthMinusTargetLength', 'AvgP2RSimilarity', 'AvgTanimotoSimilarity']
+col_names = ['Reaction Type', 'k=1', 'k=3', 'k=5', 'k=10', 'Support']
+features = ['TargetLengthIncrease', 'EditDistance', 'TanimotoSimilarity', 'RingForming', 'RingOpening', 'RingCount', 'BranchCount', 'NumAtoms']
+col_names += features
 table = []
 for rxn_type in rxn_types.values():
     row=[]
-    has_rxn_type = data[data['ReactionType'] == rxn_type]
-    has_rank = has_rxn_type[has_rxn_type['RankOfAccurate'] != 0]
-    row.append(rxn_type)
-    row.append(f"{len(has_rank[has_rank['RankOfAccurate'] <= 1]) / len(has_rxn_type):2.3%}")
-    row.append(f"{len(has_rank[has_rank['RankOfAccurate'] <= 3]) / len(has_rxn_type):2.3%}")
-    row.append(f"{len(has_rank[has_rank['RankOfAccurate'] <= 5]) / len(has_rxn_type):2.3%}")
-    row.append(f"{len(has_rank[has_rank['RankOfAccurate'] <= 10]) / len(has_rxn_type):2.3%}")
+    has_rxn_type = data[data[rxn_type]]
+    row.append(rxn_type.lower().capitalize())
+    row.append(f"{has_rxn_type['K=1'].mean()*100:.1f}")# $\pm$ {calc_topk_interval(has_rxn_type['K=1'].mean(), len(data)):.2%}")
+    row.append(f"{has_rxn_type['K=3'].mean()*100:.1f}")# $\pm$ {calc_topk_interval(has_rxn_type['K=3'].mean(), len(data)):.2%}")
+    row.append(f"{has_rxn_type['K=5'].mean()*100:.1f}")# $\pm$ {calc_topk_interval(has_rxn_type['K=5'].mean(), len(data)):.2%}")
+    row.append(f"{has_rxn_type['K=10'].mean()*100:.1f}")# $\pm$ {calc_topk_interval(has_rxn_type['K=10'].mean(), len(data)):.2%}")
     row.append(len(has_rxn_type))
-    row.append(has_rxn_type['TargetLength'].mean())
-    row.append(has_rxn_type['SourceLength'].mean())
-    row.append(has_rxn_type['TargetLengthIncrease'].mean())
-    row.append(has_rxn_type['SampleLengthMinusTargetLength'].mean())
-    row.append(has_rxn_type['P2RSimilarity'].mean())
-    row.append(has_rxn_type['TanimotoSimilarity'].mean())
+    for feature in features:
+        if feature == 'RingForming':
+            row.append(has_rxn_type[feature].mean() * 100)
+        elif feature == 'RingOpening':
+            row.append(has_rxn_type[feature].mean() * 100)
+        else:
+            row.append(has_rxn_type[feature].mean())
     table.append(row)
 
-st.dataframe(pd.DataFrame(table, columns=col_names).sort_values(by='Support', ascending=False))
+df = pd.DataFrame(table, columns=col_names).sort_values(by='Support', ascending=False)
+st.dataframe(df)
+# print(df.to_latex(index=False, float_format="%.1f"))
+
 
 st.header('Correlation of Dataset Statistics')
 
-st.dataframe(data.select_dtypes(include=['bool', 'number']).corr())
+df = data.select_dtypes(include=['bool', 'number'])
+rho = df.corr()
+pval = df.corr(method=lambda x, y: pearsonr(x, y)[1]) - np.eye(*rho.shape)
+p = pval.map(lambda x: ''.join(['*' for t in [.05, .01, .001] if x<=t]))
+st.dataframe(rho.round(4).astype(str) + p)
+
+
+st.header('Lines of best fit for Dataset Statistics')
+
+data_rsmiles = pd.read_pickle('st_rsmiles_data.tmp')
+statistics = ['TargetLengthIncrease', 'EditDistance', 'TanimotoSimilarity', 'RingForming', 'RingOpening', 'RingCount', 'BranchCount', 'NumAtoms']
+ks = ['K=1', 'K=3', 'K=10']
+dat_mat = []
+for stat in statistics:
+    dat_mat.append([])
+    print(stat)
+    for k in ks:
+        res_differ = linregress(data[stat], data[k])
+        res_rsmiles = linregress(data_rsmiles[stat], data_rsmiles[k])
+        
+        z = (res_differ.slope - res_rsmiles.slope) / np.sqrt(res_differ.stderr**2 + res_rsmiles.stderr**2)
+        p = 2 * stats.norm.cdf(-abs(z))
+        
+        significance = ''.join(['*' for t in [.05, .01, .001] if res_differ.pvalue<=t])
+        rsmiles_significance = ''.join(['+' for t in [.05, .01, .001] if p<=t])
+        difference = res_differ.slope - res_rsmiles.slope
+        dat_mat[-1].append(f'{res_differ.slope:.4f}{significance} ({difference:.4f}){rsmiles_significance}')
+        
+        part1 = f'\\textbf{{{res_differ.slope:.4f}}}' if res_differ.pvalue <= .01 else (f'\\underline{{{res_differ.slope:.4f}}}' if res_differ.pvalue <= .05 else f'{res_differ.slope:.4f}')
+        part2 = f'\\textbf{{({difference:+.4f})}}' if p <= .01 else (f'(\\underline{{{difference:+.4f}}})' if p <= .05 else f'({difference:+.4f})')
+        print(f'{part1}~{part2} ' + ('&' if k != ks[-1] else '\\\\'))
+
+st.dataframe(pd.DataFrame(dat_mat, index=statistics, columns=ks))
 
 st.header('Comparison of Molecular Properties for Molecules with and without Valid Samples')
 
-mode = st.selectbox("Mode:", ['HasValid', 'HasAccurate', 'MaxIsAccurate', 'MaxHasAccurate'], index=2, key='mode', placeholder='HasValid')
+mode = st.selectbox("Mode:", sorted(data.select_dtypes(include=['bool']).columns), index=4, key='mode', placeholder='K=1')
 var1 = st.selectbox("Choose X Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='var1', index=None, placeholder='TargetLengthIncrease')
 var2 = st.selectbox("Choose Y Property:", ['None'] + sorted(data.select_dtypes(include=['bool', 'number']).columns), key='var2', index=None, placeholder='SampleLengthIncrease')
 
@@ -419,48 +533,22 @@ else:
 
 st.altair_chart(joint_chart, use_container_width=True)
 
-# st.header('Accuracy and Validity rates of Diffusion Samples Compared to Molecular Properties of the Target')
-
-# var = st.selectbox("Choose Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='var', index=None, placeholder='SampleLengthMinusTargetLength')
-
-# if var is None:
-#     var = 'SampleLengthMinusTargetLength'
-
-# v_chart = alt.Chart(data).mark_rect().encode(
-#     alt.X(var).bin(maxbins=20),
-#     alt.Y('SampleValidity').bin(maxbins=11),
-#     alt.Color('count():Q').scale(scheme='greenblue')
-#     ).properties(
-#     width=200,
-#     height=200        
-# )
-
-# a_chart = alt.Chart(data).mark_rect().encode(
-#     alt.X(var).bin(maxbins=20),
-#     alt.Y('AccuracyOfValid').bin(maxbins=11),
-#     alt.Color('count():Q').scale(scheme='greenblue')
-#     ).properties(
-#     width=200,
-#     height=200        
-# )
-
-# st.altair_chart(v_chart | a_chart, use_container_width=True)
 
 st.header('Morgan Fingerprint Analysis')
-fvar = st.selectbox("Choose Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='fvar', index=None, placeholder='HasAccurate')
+fvar = st.selectbox("Choose Property:", sorted(data.select_dtypes(include=['bool', 'number']).columns), key='fvar', index=None)
 
 if fvar is None:
-    fvar='HasAccurate'
+    fvar='K=10'
 
 fps = np.array(list(data['TargetMF']))
-if data[fvar].dtype == 'bool':
-    corrs = np.array([((data[fvar] * 2 - 1) * (fps[:, i] * 2 - 1)).mean() for i in range(fps.shape[-1])])
-    corrs = np.round(corrs, 5)
-    pvals = None
-else:
-    stats = [pointbiserialr(data[fvar], fps[:, i]) for i in range(fps.shape[-1])]
-    corrs = np.round(np.array([s.statistic for s in stats]), 5)
-    pvals = np.round(np.array([s.pvalue for s in stats]), 5)
+
+# tfps = np.array(list(data['TargetMF']))
+# sfps = np.array(list(data['SourceMF']))
+# fps = (tfps - sfps).astype(int)
+
+stat = [pearsonr(data[fvar], fps[:, i]) for i in range(fps.shape[-1])]
+corrs = np.array([s.statistic for s in stat])
+pvals = np.array([s.pvalue for s in stat])
 counts = fps.sum(axis=0)
 arg_corrs = np.argsort(corrs)
 arg_corrs = arg_corrs[counts[arg_corrs] > 0]
@@ -469,23 +557,28 @@ top_neg, top_pos = arg_corrs[:10], arg_corrs[-10:]
 mols = []
 for fpbit in top_neg:
     i = np.random.choice(np.where(fps[:, fpbit] == 1)[0])
-    mol = Chem.MolFromSmiles(data.index[i])
+    mol = Chem.MolFromSmiles(data['TargetSmiles'][i])
+    # mol = Chem.MolFromSmiles(data['SourceSmiles'][i])
     info={}
     fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=2024, bitInfo=info)
     mols.append((mol, fpbit, info))
 
-img=Draw.DrawMorganBits(mols, molsPerRow=5, legends=[str(x) for x in zip(corrs[top_neg], counts[top_neg])], drawOptions=drawOptions)
+labels = ['C1', 'C2', 'C3', 'C4', 'C5', 'D1', 'D2', 'D3', 'D4', 'D5']
+formatter = lambda s: f'{s[3]}: r={s[0]:.2f}, N={s[1]}'#, p={s[2]:.2f}'
+img=Draw.DrawMorganBits(mols, molsPerRow=5, legends=list(map(formatter, zip(corrs[top_neg], counts[top_neg], pvals[top_neg], labels))), drawOptions=drawOptions)
 st.image(img)
 
 mols = []
 for fpbit in top_pos:
     i = np.random.choice(np.where(fps[:, fpbit] == 1)[0])
-    mol = Chem.MolFromSmiles(data.index[i])
+    mol = Chem.MolFromSmiles(data['TargetSmiles'][i])
+    # mol = Chem.MolFromSmiles(data['SourceSmiles'][i])
     info={}
     fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(mol, radius=2, nBits=2024, bitInfo=info)
     mols.append((mol, fpbit, info))
 
-img=Draw.DrawMorganBits(mols, molsPerRow=5, legends=[str(x) for x in zip(corrs[top_pos], counts[top_pos])], drawOptions=drawOptions)
+labels = ['B5', 'B4', 'B3', 'B2', 'B1', 'A5', 'A4', 'A3', 'A2', 'A1']
+img=Draw.DrawMorganBits(mols, molsPerRow=5, legends=reversed(list(map(formatter, zip(corrs[top_pos], counts[top_pos], pvals[top_pos], labels)))), drawOptions=drawOptions)
 st.image(img)
 
 st.header('Randomly Generated Example Reactions')
@@ -493,7 +586,7 @@ rxn_type = st.selectbox("Specify a Reaction Type?", ['None'] + list(rxn_types.va
 
 sub_samples = samples
 if rxn_type != 'None':
-    has_rxn_type = set(data[data['ReactionType'] == rxn_type]['SourceSmiles'])
+    has_rxn_type = set(data[data[rxn_type]]['SourceSmiles'])
     sub_samples = {k: v for k, v in samples.items() if k in has_rxn_type}
 
 if st.button('Generate'):
@@ -501,53 +594,11 @@ if st.button('Generate'):
         source = np.random.choice(list(sub_samples))
         canon_source = canonicalize(source)
         sm = Chem.MolFromSmiles(source)
-        AllChem.Compute2DCoords(sm)
+        # AllChem.Compute2DCoords(sm)
         
-        target = sub_samples[source]['target'].rstrip('?')
+        target = samples[source]['target'].rstrip('?')
         tm = Chem.MolFromSmiles(target)
-        AllChem.Compute2DCoords(tm)
-        canon_target = Chem.MolToSmiles(tm)
-        
-        mols, legs = [], []
-        mols.append(sm)
-        legs.append('Source')
-        mols.append(tm)
-        legs.append('Target')
-
-        rankings = defaultdict(int)
-        valid = 0
-        for smi in sub_samples[source]['samples']:
-            num_pad = smi.count('?')
-            smi = canonicalize(smi)
-            if smi is None or smi == canon_source:
-                # print(f'\t{smi}')
-                continue
-            valid += 1
-            rankings[smi] += 1
-
-        for smi, rating in sorted(rankings.items(), key = lambda x: x[1], reverse=True):
-            if smi is None:
-                continue
-            m = Chem.MolFromSmiles(smi)
-            AllChem.Compute2DCoords(m)
-            mols.append(m)
-            legs.append(f'{"*" if smi == canon_target else ""}Rating: {rating} ({rating  / valid:2.3%})')
-        
-        max_mols = 7
-        img=Draw.MolsToGridImage(mols[:max_mols], molsPerRow=min(len(mols), max_mols),subImgSize=(300,300),legends=legs, useSVG=True)
-        st.image(img._repr_svg_())
-
-st.header("Reaction Search")
-source_smiles = st.text_input('Source (Product) SMILES')
-if source_smiles:
-    source = canonicalize(source_smiles)
-    if source in samples:
-        sm = Chem.MolFromSmiles(source)
-        AllChem.Compute2DCoords(sm)
-        
-        target = samples[source]['target']
-        tm = Chem.MolFromSmiles(target)
-        AllChem.Compute2DCoords(tm)
+        # AllChem.Compute2DCoords(tm)
         canon_target = Chem.MolToSmiles(tm)
         
         mols, legs = [], []
@@ -567,17 +618,72 @@ if source_smiles:
             valid += 1
             rankings[smi] += 1
 
-        for smi, rating in sorted(rankings.items(), key = lambda x: x[1], reverse=True):
+        for i, (smi, rating) in enumerate(sorted(rankings.items(), key = lambda x: x[1], reverse=True)):
             if smi is None:
                 continue
             m = Chem.MolFromSmiles(smi)
-            AllChem.Compute2DCoords(m)
+            # AllChem.Compute2DCoords(m)
             mols.append(m)
-            legs.append(f'{"*" if smi == canon_target else ""}Rating: {rating} ({rating  / valid:2.3%})')
+            legs.append(f'{"*" if smi == canon_target else ""}Rank: {i + 1} ({rating  / valid:2.1%})')
+
+        max_mols = 5
+        mols = mols[:max_mols] + [m for m, l in zip(mols[max_mols:], legs[max_mols:]) if l.startswith('*')]
+        legs = legs[:max_mols] + [l for l in legs[max_mols:] if l.startswith('*')]
+        highlight = find_mol_differences(sm, tm, mols[2:])
+        img=Draw.MolsToGridImage(mols, molsPerRow=len(mols),subImgSize=(300,300), legends=legs, highlightAtomLists=highlight, returnPNG=True)
+        png_bytes = base64.b64decode(img._repr_png_())
+        image_file = io.BytesIO(png_bytes)
+        img = PIL.Image.open(image_file)
+        st.image(img)
+
+st.header("Reaction Search")
+source_smiles = st.text_input('Source (Product) SMILES')
+if source_smiles:
+    source = canonicalize(source_smiles)
+    if source in samples:
+        sm = Chem.MolFromSmiles(source)
+        # AllChem.Compute2DCoords(sm)
         
-        max_mols = 7
-        img=Draw.MolsToGridImage(mols[:max_mols], molsPerRow=min(len(mols), max_mols),subImgSize=(300,300),legends=legs, useSVG=True)
-        st.image(img._repr_svg_())
+        target = samples[source]['target'].rstrip('?')
+        tm = Chem.MolFromSmiles(target)
+        # AllChem.Compute2DCoords(tm)
+        canon_target = Chem.MolToSmiles(tm)
+        
+        mols, legs = [], []
+        mols.append(sm)
+        legs.append('Source')
+        mols.append(tm)
+        legs.append('Target')
+
+        rankings = defaultdict(int)
+        valid = 0
+        for smi in samples[source]['samples']:
+            num_pad = smi.count('?')
+            smi = canonicalize(smi)
+            if smi is None or smi == source:
+                # print(f'\t{smi}')
+                continue
+            valid += 1
+            rankings[smi] += 1
+
+        for i, (smi, rating) in enumerate(sorted(rankings.items(), key = lambda x: x[1], reverse=True)):
+            if smi is None:
+                continue
+            m = Chem.MolFromSmiles(smi)
+            # AllChem.Compute2DCoords(m)
+            mols.append(m)
+            legs.append(f'{"*" if smi == canon_target else ""}Rank: {i + 1} ({rating  / valid:2.1%})')
+
+        max_mols = 10
+        mols = mols[:max_mols]# + [m for m, l in zip(mols[max_mols:], legs[max_mols:]) if l.startswith('*')]
+        legs = legs[:max_mols]# + [l for l in legs[max_mols:] if l.startswith('*')]
+        highlight = find_mol_differences(sm, tm, mols[2:])
+        img=Draw.MolsToGridImage(mols, molsPerRow=len(mols),subImgSize=(300,300), legends=legs, highlightAtomLists=highlight, returnPNG=True)
+        png_bytes = base64.b64decode(img._repr_png_())
+        image_file = io.BytesIO(png_bytes)
+        img = PIL.Image.open(image_file)
+        st.image(img)
+
 
 else:
     st.write('Not a valid SMILES string.')
@@ -612,3 +718,35 @@ ax.set_xlabel("Number of Molecules", fontsize=16)
 ax.set_ylabel("Percent", fontsize=16)
 
 st.pyplot(f)
+
+# np.save('sample_count.npy', data[['SampleCount', 'K=1']].values)
+
+st.header('Lines of best fit for Dataset Statistics')
+
+# sns.set_theme()
+statistics = ['TargetLengthIncrease', 'EditDistance', 'RingForming', 'RingOpening', 'BranchCount']
+titles = ['Target Length Diff.', 'Edit Distance', 'Ring Adding', 'Ring Removing', 'Branch Count']
+ks = ['K=1']#, 'K=3', 'K=10']
+fig, axes = plt.subplots(len(ks), len(statistics), figsize=(13, 2.2*len(ks)), sharex=False, sharey=True, squeeze=False)
+for i, stat in enumerate(statistics):
+    print(stat)
+    for j, k in enumerate(ks):
+        res_differ = linregress(data[stat], data[k])
+        res_rsmiles = linregress(data_rsmiles[stat], data_rsmiles[k])
+
+        vals = np.linspace(data[stat].min(), data[stat].max(), 10)
+        y_differ = res_differ.intercept + res_differ.slope * vals
+        y_rsmiles = res_rsmiles.intercept + res_rsmiles.slope * vals
+        axes[j, i].plot(vals, y_differ, label='DiffER$^2$PG+', color='tab:blue')
+        axes[j, i].plot(vals, y_rsmiles, label='R-SMILES', color='tab:orange')
+        axes[j, i].set_xlim(vals.min(), vals.max())
+        axes[j, i].set_ylim(0, 0.8)
+
+        if i == 0:
+            axes[j, i].set_ylabel(k, fontsize=16)
+        if j == 0:
+            axes[j, i].set_title(titles[i], fontsize=16)
+
+axes[-1, -1].legend(fontsize=12, loc='lower left')
+
+st.pyplot(fig)
