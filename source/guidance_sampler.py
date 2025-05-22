@@ -60,23 +60,23 @@ class GuidanceSampler(UnifiedSampler):
             t_tensor = torch.full((length_mask.shape[0],), t, device=device)
             s_tensor = torch.full((length_mask.shape[0],), s, device=device)            
 
+            x_t.requires_grad = True
             logits = model.decode(x_t, length_mask, memory, memory_pad_mask, t_tensor)
+            fprob_t = F.softmax(logits, dim=-1)
 
             # Run guidance model on token_output
             ##############################
-            valid_scores, scores = guidance_model.get_scores(x_t)
             
-            log_x_t = torch.log(x_t + 1e-10)
-            log_x_t.requires_grad = True
-            classifier_output = guidance_model.forward(log_x_t, length_mask)
-            classifier_prob = torch.sigmoid(classifier_output)
+            guidance_model.train()
+            classifier_output = guidance_model.forward(fprob_t, length_mask)
+            classifier_log_prob = torch.log(torch.sigmoid(classifier_output))
 
             block = torch.ones((20, 20), device=device) - torch.eye(20, device=device)
-            block_mat = torch.block_diag(*[block for _ in range(batch // 20)])
-            classifier_log_prob = torch.log((classifier_prob * block_mat).sum(dim=-1) / block_mat.sum(dim=-1))
+            block_mat = torch.block_diag(*[block for _ in range(len(lengths) // 20)])
+            classifier_log_prob = (classifier_log_prob * block_mat).sum(dim=-1)
 
             classifier_log_prob.sum().backward(retain_graph=True)
-            classifier_grad = log_x_t.grad
+            classifier_grad = x_t.grad
 
             classifier_log_prob_ratio = (
                 classifier_grad - (x_t * classifier_grad).sum(dim=-1, keepdim=True)
@@ -86,14 +86,13 @@ class GuidanceSampler(UnifiedSampler):
                 classifier_log_prob[..., None, None]
             ).detach().requires_grad_(False)
 
-            classifier_log_prob = classifier_log_prob
-
             optimizer.zero_grad()
+            valid_scores, scores = guidance_model.get_scores(fprob_t)
             classifier_loss = guidance_model.get_loss(classifier_output, scores.to(classifier_output.device))
-            classifier_loss.sum().backward()
+            classifier_loss.sum().backward(retain_graph=True)
             optimizer.step()
+            
             ##############################
-            fprob_t = F.softmax(logits, dim=-1)
             x_t = x_t.max(dim=-1)[1]
             
             prob_s = self.diffuser.ps_t_prob(fprob_t, x_t, t_tensor, s_tensor).type(torch.float)
@@ -102,7 +101,7 @@ class GuidanceSampler(UnifiedSampler):
             # apply guidance
             diffusion_log_probs = torch.log(prob_s)
             alphabar_t, _ = self.diffuser.get_alphabar_beta(t_tensor)
-            guided_log_probs = (alphabar_t * gamma * classifier_log_prob) + diffusion_log_probs
+            guided_log_probs = (alphabar_t[..., None, None] * gamma * classifier_log_prob) + diffusion_log_probs
 
             x_s = sample_categorical(torch.exp(guided_log_probs))
             x_s[length_mask] = x_t[length_mask]

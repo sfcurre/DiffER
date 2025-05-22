@@ -42,7 +42,7 @@ class ParticleGuidanceModel(nn.Module):
         RDLogger.DisableLog("rdApp.*")
 
     def forward(self, encoder_input, encoder_pad_mask):
-        encoder_embs = self.embed_log_onehot(encoder_input)
+        encoder_embs = self.embed_onehot(encoder_input)
         batch, _, _ = tuple(encoder_embs.size())
         
         len_tokens = self.length_rep(torch.zeros(batch, 1, dtype=torch.int32, device=encoder_embs.device))
@@ -56,10 +56,9 @@ class ParticleGuidanceModel(nn.Module):
         output = self.output_fc(distance).squeeze(-1)
         return output
 
-    def embed_log_onehot(self, onehot_input, t=None):
+    def embed_onehot(self, onehot_input, t=None):
         _, seq_len, _ = tuple(onehot_input.size())
 
-        onehot_input = torch.exp(onehot_input)
         onehot_embs = torch.matmul(onehot_input, self.emb.weight)
         onehot_embs = onehot_embs * np.sqrt(self.d_model)
 
@@ -83,7 +82,7 @@ class ParticleGuidanceModel(nn.Module):
         for m1 in sampled_mols:
             scores.append([])
             for m2 in sampled_mols:
-                if m1 == m2 or m1 is None:
+                if m1 == m2 or m1 is None or m2 is None:
                     scores[-1].append(0)
                 else:
                     scores[-1].append(1)
@@ -105,5 +104,6 @@ class ParticleGuidanceModel(nn.Module):
         return valid_scores, distance_scores
     
     def get_loss(self, output, scores):
+        output = torch.sigmoid(output)
         classifier_loss = F.binary_cross_entropy(output, scores)
         return classifier_loss

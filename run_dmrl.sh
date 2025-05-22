@@ -23,7 +23,7 @@ conda activate deepchem
 cd ~/Retro-Diffusion
 
 PadLimit=80
-FineTune=2
+FineTune=1
 FineTuneSub=$((FineTune-1))
 
 
@@ -33,11 +33,11 @@ FineTuneSub=$((FineTune-1))
 #     python train.py --name "BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous.yaml" --load "out/models/BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
 # fi
 
-if (($FineTune == 0)); then
-    python train.py --name "BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_discrete.yaml" --pad_limit $PadLimit
-else
-    python train.py --name "BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_discrete.yaml" --load "out/models/BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
-fi
+# if (($FineTune == 0)); then
+#     python train.py --name "BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_discrete.yaml" --pad_limit $PadLimit
+# else
+#     python train.py --name "BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_discrete.yaml" --load "out/models/BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
+# fi
 
 # if (($FineTune == 0)); then
 #     python train.py --name "BackwardUnifiedContinuous_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous.yaml" --pad_limit -1
@@ -51,11 +51,11 @@ fi
 #     python train.py --name "ForwardUnifiedContinuous_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous_forward.yaml" --load "out/models/ForwardUnifiedContinuous_NoPadLimit-${FineTuneSub}.pkl" --pad_limit -1
 # fi
 
-# if (($FineTune == 0)); then
-#     python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --pad_limit -1
-# else
-#     python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --load "out/models/BackwardUnifiedDiscrete_NoPadLimit-${FineTuneSub}.pkl" --pad_limit -1
-# fi
+if (($FineTune == 0)); then
+    python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --pad_limit -1
+else
+    python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --load "out/models/BackwardUnifiedDiscrete_NoPadLimit-${FineTuneSub}.pkl" --pad_limit -1
+fi
 
 # if (($FineTune == 0)); then
 #     python train.py --name "BackwardUnifiedContinuousMoE_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous_moe.yaml" --pad_limit -1
