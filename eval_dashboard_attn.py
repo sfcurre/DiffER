@@ -6,8 +6,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import PIL, io
-# PIL.ImageFile.LOAD_TRUNCATED_IMAGES = True
-
 
 from source.tokeniser import REGEX
 
@@ -40,14 +38,10 @@ def tokenise(smi):
     regex = re.compile(REGEX)
     return ['^'] + re.findall(regex, smi) + ['&']
 
-def clear_tmp_data():
-    if os.path.exists('st_attn_data.tmp'):
-        os.remove('st_attn_data.tmp')
 
 st.title('Categorical Diffusion for Retrosynthesis - Attention Evaluation')
 """Sean Current"""
 
-# DATAFILE = st.file_uploader('Upload JSON source/target/samples attention dataset:', on_change=clear_tmp_data, accept_multiple_files=False)
 DATAFILE = 'BackwardUnifiedContinuous_NoPadLimit_T100-3_attns.json'
 
 data = torch.load(DATAFILE)
@@ -81,8 +75,6 @@ for i, source in enumerate(data):
     data[source]['Synthesis'] = synthesis
     data[source]['Accurate'] = canonicalize(target) == canonicalize(sample)
     data[source]['Valid'] = canonicalize(sample) is not None
-
-torch.save(data, 'st_attn_data.tmp')
 
 loading_bar.empty()
 
@@ -468,14 +460,6 @@ if st.checkbox('View decoder attention maps for publication?'):
         all_images.append(images)
         all_captions.append(captions)
 
-        # container = st.container(border=True)
-        # with container:
-        #     columns = st.columns(4)
-        #     for i, (image, caption) in enumerate(zip(images, captions)):
-        #         with columns[i]:
-        #             st.image(image, caption=caption)
-    
-
     for k in range(2):        
         overfig = plt.figure(constrained_layout=True, figsize=(15, len(all_images) // 2 * 5.5))
         figs = overfig.subfigures(len(all_images) // 2)
@@ -514,6 +498,6 @@ if st.checkbox('View decoder attention maps for publication?'):
                 if j == 0:
                     axes[j].set_ylabel('Output Sequence', fontsize=14, labelpad=-70)
 
-        plt.savefig(f'attention_maps_{k}.png', dpi=300, bbox_inches='tight')
+        # plt.savefig(f'attention_maps_{k}.png', dpi=300, bbox_inches='tight')
         st.pyplot(overfig)
     

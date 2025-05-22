@@ -21,8 +21,6 @@ from rdkit.Chem import rdMolDescriptors, AllChem, Draw, rdFMCS
 from rdkit import Chem, RDLogger, DataStructs
 drawOptions = Draw.rdMolDraw2D.MolDrawOptions()
 drawOptions.prepareMolsBeforeDrawing = False
-# drawOptions.fontFile = 'NotoSerif-VariableFont_wdth,wght.ttf'
-# drawOptions.legendFontSize = 40
 AllChem.ConstrainedDepictionParams.alignOnly=True
 
 from rdkit.Chem.Draw import IPythonConsole
@@ -33,7 +31,6 @@ IPythonConsole.drawOptions.circleAtoms = False
 IPythonConsole.drawOptions.setHighlightColour((.9,0,0,.8))
 IPythonConsole.drawOptions.legendFontSize = 24
 IPythonConsole.molSize = 300,300
-# IPythonConsole.drawOptions.fontFile = 'NotoSans-Medium.ttf'
 
 RDLogger.DisableLog("rdApp.*")
 
@@ -130,8 +127,6 @@ def find_mol_differences(sm, tm, mols):
     mol_atoms = []
     mcs_ = rdFMCS.FindMCS([sm, tm])
     mcs_mol_ = Chem.MolFromSmarts(mcs_.smartsString)
-    # AllChem.GenerateDepictionMatching2DStructure(sm, mcs_mol)
-    # AllChem.GenerateDepictionMatching2DStructure(tm, mcs_mol)
     AllChem.Compute2DCoords(sm)
     AllChem.Compute2DCoords(tm)
 
@@ -150,7 +145,6 @@ def find_mol_differences(sm, tm, mols):
     mol_atoms.append(atoms)
 
     for mol in mols:
-        # AllChem.GenerateDepictionMatching2DStructure(mol, mcs_mol)
         AllChem.Compute2DCoords(mol)
     
         mcs_ = rdFMCS.FindMCS([sm, mol])
@@ -290,7 +284,6 @@ def process_samples(samples):
         for smi in ranked_choice:
             for mod in mod_ranks:
                 if smi in mod_ranks[mod]:
-                    # print(smi, mod_ranks[mod][smi])
                     ranked_choice[smi] += mod_ranks[mod][smi]
 
         rankings = {smi: (rankings_by_plurality[smi], ranked_choice[smi]) for smi in ranked_choice}
@@ -405,17 +398,6 @@ col2.metric("Median Sample Count (Top-1 Accurate)", f"{data[data['MaxIsAccurate'
 col3.metric("Mean Sample Count (Top-1 Not Accurate)", f"{data[~data['MaxIsAccurate']]['SampleCount'].mean():.1f}")
 col4.metric("Median Sample Count (Top-1 Not Accurate)", f"{data[~data['MaxIsAccurate']]['SampleCount'].median():.1f}")
 
-# st.write('Accuracy of Reactions with Rings:')
-# col1, col2, col3 = st.columns(3)
-# col1.metric("Non-Ring Reaction", f"{data[data['NonRing']]['MaxHasAccurate'].mean():2.3%}")
-# col2.metric("Ring-Opening Reaction", f"{data[data['RingOpening']]['MaxHasAccurate'].mean():2.3%}")
-# col3.metric("Ring-Closing Reaction", f"{data[data['RingForming']]['MaxHasAccurate'].mean():2.3%}")
-
-# st.write('Accuracy of Reaction Types:')
-# col1, col2 = st.columns(2)
-# col1.metric("Synthesis Reaction", f"{data[data['Synthesis']]['MaxHasAccurate'].mean():2.3%}")
-# col2.metric("Elimination Reaction", f"{data[~data['Synthesis'].astype(bool)]['MaxHasAccurate'].mean():2.3%}")
-
 st.write(' ')
 st.write(f'Metrics conditioned on samples with at least one valid output:')
 
@@ -528,7 +510,6 @@ else:
         x=var1,
         y=var2,
         color=alt.Color(mode + ':N').scale(domain=domain, range=range_),
-        # tooltip=['Name', 'Origin', 'Horsepower', 'Miles_per_Gallon']
     )
 
 st.altair_chart(joint_chart, use_container_width=True)
@@ -613,7 +594,6 @@ if st.button('Generate'):
             num_pad = smi.count('?')
             smi = canonicalize(smi)
             if smi is None or smi == source:
-                # print(f'\t{smi}')
                 continue
             valid += 1
             rankings[smi] += 1
@@ -622,7 +602,6 @@ if st.button('Generate'):
             if smi is None:
                 continue
             m = Chem.MolFromSmiles(smi)
-            # AllChem.Compute2DCoords(m)
             mols.append(m)
             legs.append(f'{"*" if smi == canon_target else ""}Rank: {i + 1} ({rating  / valid:2.1%})')
 
@@ -642,11 +621,9 @@ if source_smiles:
     source = canonicalize(source_smiles)
     if source in samples:
         sm = Chem.MolFromSmiles(source)
-        # AllChem.Compute2DCoords(sm)
         
         target = samples[source]['target'].rstrip('?')
         tm = Chem.MolFromSmiles(target)
-        # AllChem.Compute2DCoords(tm)
         canon_target = Chem.MolToSmiles(tm)
         
         mols, legs = [], []
@@ -661,7 +638,6 @@ if source_smiles:
             num_pad = smi.count('?')
             smi = canonicalize(smi)
             if smi is None or smi == source:
-                # print(f'\t{smi}')
                 continue
             valid += 1
             rankings[smi] += 1
@@ -670,7 +646,6 @@ if source_smiles:
             if smi is None:
                 continue
             m = Chem.MolFromSmiles(smi)
-            # AllChem.Compute2DCoords(m)
             mols.append(m)
             legs.append(f'{"*" if smi == canon_target else ""}Rank: {i + 1} ({rating  / valid:2.1%})')
 
@@ -723,10 +698,9 @@ st.pyplot(f)
 
 st.header('Lines of best fit for Dataset Statistics')
 
-# sns.set_theme()
 statistics = ['TargetLengthIncrease', 'EditDistance', 'RingForming', 'RingOpening', 'BranchCount']
 titles = ['Target Length Diff.', 'Edit Distance', 'Ring Adding', 'Ring Removing', 'Branch Count']
-ks = ['K=1']#, 'K=3', 'K=10']
+ks = ['K=1', 'K=3', 'K=10']
 fig, axes = plt.subplots(len(ks), len(statistics), figsize=(13, 2.2*len(ks)), sharex=False, sharey=True, squeeze=False)
 for i, stat in enumerate(statistics):
     print(stat)

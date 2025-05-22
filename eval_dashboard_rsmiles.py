@@ -109,10 +109,6 @@ def get_tokenised_length(tokeniser, smiles):
     smiles = smiles.replace('?', '')
     return len(tokeniser.tokenise([smiles])['original_tokens'][0])
 
-def rating_func(smi, canon_source, pred_confidence, length_confidence, num_pad):
-    # rating = 20 - (len(smi) - len(canon_source))
-    rating = 1 #length_confidence
-    return round(rating, 2)
 
 st.title('Categorical Diffusion for Retrosynthesis - Evaluation')
 """Sean Current"""
@@ -188,9 +184,6 @@ if not os.path.exists('st_rsmiles_data.tmp'):
         data['SampleLengthMinusTargetLength'].append(avg_sample_length - target_length)
         data['SampleLengthVariance'].append(np.std(sample_lengths))
 
-        # data['ShannonEntropy'].append(shannon(canon_target))
-        # compressed = zlib.compress(canon_target.encode())
-        # data['CompressionRate'] = sys.getsizeof(canon_target.encode()) / sys.getsizeof(compressed)
         data['P2RSimilarity'].append(SequenceMatcher(None, canon_source, canon_target).ratio()) 
         data['EditDistance'].append(np.mean(samples[source]['edit_distance']))
 
@@ -224,7 +217,6 @@ if not os.path.exists('st_rsmiles_data.tmp'):
         data['TargetSmiles'].append(canon_target)
         data['SampleValidity'].append(np.mean(valid_rates) / (len(smis) * len(smis[0])))
         data['SampleAccuracy'].append(np.mean([smi==canon_target for aug_smis in smis for smi in aug_smis]))
-        # data['SampleMaxFrag'].append(max_frag_accurate / len(smis))
         data['SampleCount'].append(len(set(rankings)))
         data['Generations'].append(len(smis))
         data['HasValid'].append(np.mean(valid_rates) > 0)
@@ -235,23 +227,9 @@ if not os.path.exists('st_rsmiles_data.tmp'):
         data['K=5'].append(accurate_rank <= 5)
         data['K=10'].append(accurate_rank <= 10)
 
-        # source_size = Chem.MolFromSmiles(source).GetNumAtoms()
-        # target_size = Chem.MolFromSmiles(target).GetNumAtoms()
-        
-        # data['TargetSize'].append(target_size)
-        # data['SourceSize'].append(source_size)
-        # data['TargetSizeIncrease'].append(target_size - source_size)
-        
-        # avg_sample_size = np.mean(sample_sizes)
-        # data['SampleSize'].append(avg_sample_size)
-        # data['SampleSizeIncrease'].append(avg_sample_size - source_size)
-        # data['SampleSizeMinusTargetSize'].append(avg_sample_size - target_size)
-        # data['SampleSizeVariance'].append(np.std(sample_sizes))
-        
 
     data = pd.DataFrame(data)
     data = data.groupby('SourceSmiles').mean(numeric_only=True)
-    # data = data.set_index('Target')
     data.to_pickle('st_rsmiles_data.tmp')
 
     loading_bar.empty()
@@ -301,16 +279,6 @@ col2.metric("Median Sample Count (Top-1 Accurate)", f"{data[data['MaxIsAccurate'
 col3.metric("Mean Sample Count (Top-1 Not Accurate)", f"{data[~(data['MaxIsAccurate'] > 0)]['SampleCount'].mean():.1f}")
 col4.metric("Median Sample Count (Top-1 Not Accurate)", f"{data[~(data['MaxIsAccurate'] > 0)]['SampleCount'].median():.1f}")
 
-# st.write('Accuracy of Reactions with Rings:')
-# col1, col2, col3 = st.columns(3)
-# col1.metric("Non-Ring Reaction", f"{data[data['NonRing']]['MaxHasAccurate'].mean():2.3%}")
-# col2.metric("Ring-Opening Reaction", f"{data[data['RingOpening']]['MaxHasAccurate'].mean():2.3%}")
-# col3.metric("Ring-Closing Reaction", f"{data[data['RingForming']]['MaxHasAccurate'].mean():2.3%}")
-
-# st.write('Accuracy of Reaction Types:')
-# col1, col2 = st.columns(2)
-# col1.metric("Synthesis Reaction", f"{data[data['Synthesis']]['MaxHasAccurate'].mean():2.3%}")
-# col2.metric("Elimination Reaction", f"{data[~data['Synthesis'].astype(bool)]['MaxHasAccurate'].mean():2.3%}")
 
 st.header('Metrics by reaction type:')
 
@@ -378,7 +346,6 @@ else:
         x=var1,
         y=var2,
         color=alt.Color(mode + ':Q').scale(domain=domain, range=range_),
-        # tooltip=['Name', 'Origin', 'Horsepower', 'Miles_per_Gallon']
     )
 
 st.altair_chart(joint_chart, use_container_width=True)
