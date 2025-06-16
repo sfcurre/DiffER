@@ -38,7 +38,7 @@ To evaluate the model, the evaluation script can be run:
 python eval.py --data_path data/USPTO_50K_PtoR_aug20 --task backward_prediction --name BackwardDiffusionEval_T200_Rsmiles_LDiff20_test --num_timesteps 200 --beta_schedule cosine --batch_size 64 --load out/models/BackwardDiffusion_T200_Rsmiles_LDiff20_29.pkl --run_test
 ```
 
-This will generate a json of outputs for the BackwardDiffusion_T2000_Rsmiles_LDiff20 model. These results can be subsequently combined with the results of other models to construct an ensemble in `eval_app.py`, which can be run using streamlit:
+This will generate a json of outputs for the BackwardDiffusion_T200_Rsmiles_LDiff20 model. These results can be subsequently combined with the results of other models to construct an ensemble in `eval_app.py`, which can be run using streamlit:
 
 ```
 streamlit run eval_app.py
