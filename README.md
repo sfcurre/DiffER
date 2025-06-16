@@ -4,6 +4,24 @@ This is the working repo for [DiffER, Diffusion Ensembles for Chemical Retrosynt
 
 As a working repo, code is still liable to change and improve.
 
+## Requirements
+
+DiffER requires the following packages in Python:
+```
+numpy
+torch==2.6.0
+torchvision==0.21.0
+rdkit
+streamlit
+altair
+pandas
+numpy
+matplotlib==3.10.1
+seaborn
+scipy
+nltk
+```
+
 ## How it works
 
 ![DiffER Schematic](./paper/images/diffusion_schema.png)
@@ -25,4 +43,6 @@ This will generate a json of outputs for the BackwardDiffusion_T2000_Rsmiles_LDi
 ```
 streamlit run eval_app.py
 ```
+
+This streamlit dashboard provides a utility to upload multiple output files, which will automatically combine output files generated from `eval.py` into an ensembled result. 
 
