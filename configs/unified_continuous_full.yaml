@@ -1,6 +1,7 @@
 data:
-  data_path: 'data/USPTO_50K_PtoR_aug20'
+  data_path: 'data/USPTO_full_PtoR_aug5'
   task: 'backward_prediction'
+  pad_limit: null
 
 model:
   # architecture parameters
@@ -12,26 +13,19 @@ model:
   max_seq_len: 256
   dropout: 0.1
 
+  # loss parameters
+  length_loss: ['cross_entropy']
+  add_unk: False
+  coeff_ce: 1.0
+  coeff_vlb: 1.0
+
   #diffusion parameters
   continuous: True
-  num_timesteps: 200
-  rate_model: 'Gaussian'
+  num_timesteps: 100
   min_time: 0.01
-  loss_terms: ['elbo', 'nll']
-  length_loss: 'cross_entropy'
-  pad_limit: null
-  diffuseq: false
-  legacy: true
+  noise_schedule: 'loglinear'
+  noise_schedule_args: {}
 
-  #continuous model parameters
-  rate_const: 0.03
-  rate_sigma: 3.0
-  Q_sigma: 20.0
-  time_exponential: 1000.0
-  time_base: 0.5
-  sigma_min: 1.0
-  sigma_max: 100.0
-  
 training:
   batch_size: 64
   learning_rate: 0.0001

@@ -35,7 +35,7 @@ IPythonConsole.molSize = 300,300
 RDLogger.DisableLog("rdApp.*")
 
 rxn_types = {'<RX_1>': 'Heteroatom alkylation and arylation',
-                     '<RX_2>': 'acyclation and related processes',
+                     '<RX_2>': 'acylation and related processes',
                      '<RX_3>': 'C-C bond formation',
                      '<RX_4>': 'heterocycle formation',
                      '<RX_5>': 'protections',
@@ -457,7 +457,7 @@ st.dataframe(rho.round(4).astype(str) + p)
 st.header('Lines of best fit for Dataset Statistics')
 
 data_rsmiles = pd.read_pickle('st_rsmiles_data.tmp')
-statistics = ['TargetLengthIncrease', 'EditDistance', 'TanimotoSimilarity', 'RingForming', 'RingOpening', 'RingCount', 'BranchCount', 'NumAtoms']
+statistics = ['TargetLengthIncrease', 'EditDistance', 'TanimotoSimilarity', 'RingForming', 'RingOpening', 'RingCount', 'BranchCount', 'NumAtoms', 'TargetLength']
 ks = ['K=1', 'K=3', 'K=10']
 dat_mat = []
 for stat in statistics:
@@ -570,6 +570,9 @@ if rxn_type != 'None':
     has_rxn_type = set(data[data[rxn_type]]['SourceSmiles'])
     sub_samples = {k: v for k, v in samples.items() if k in has_rxn_type}
 
+# has_length = set(data[data['TargetLengthIncrease'] > 16]['SourceSmiles'])
+# sub_samples = {k: v for k, v in samples.items() if k in has_length}
+
 if st.button('Generate'):
     for i in range(5):
         source = np.random.choice(list(sub_samples))
@@ -660,8 +663,25 @@ if source_smiles:
         st.image(img)
 
 
-else:
-    st.write('Not a valid SMILES string.')
+b_count = 0
+lengths = defaultdict(int)
+partial = Chem.MolFromSmarts('CC1(C)OBOC1(C)C')
+for source in samples:
+    target = samples[source]['target']
+    mol = Chem.MolFromSmiles(target.rstrip('?'))
+    source_mol = Chem.MolFromSmiles(source)
+    if mol is not None and mol.HasSubstructMatch(partial) and not source_mol.HasSubstructMatch(partial):
+        b_count += 1
+        l = data[data['SourceSmiles'] == source]['TargetLengthIncrease'].values[0]
+        if l != 25:
+            b_count -= 1
+            continue
+        lengths[l] += 1
+st.write(f'Found {b_count} molecules with the substructure CC1(C)OBOC1(C)C in the target molecule.')
+st.write(f'Lengths of these molecules: {lengths}')
+
+st.write('Total reactions with these length changes: {}'.format(len(data[data['TargetLengthIncrease'].isin(lengths)])))
+
 
 st.header("Images for Publication")
 
@@ -714,7 +734,7 @@ for i, stat in enumerate(statistics):
         axes[j, i].plot(vals, y_differ, label='DiffER$^2$PG+', color='tab:blue')
         axes[j, i].plot(vals, y_rsmiles, label='R-SMILES', color='tab:orange')
         axes[j, i].set_xlim(vals.min(), vals.max())
-        axes[j, i].set_ylim(0, 0.8)
+        axes[j, i].set_ylim(0, 1)
 
         if i == 0:
             axes[j, i].set_ylabel(k, fontsize=16)

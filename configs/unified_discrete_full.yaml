@@ -1,6 +1,7 @@
 data:
-  data_path: 'data/USPTO_50K_PtoR_aug20'
+  data_path: 'data/USPTO_full_PtoR_aug5'
   task: 'backward_prediction'
+  pad_limit: null
 
 model:
   # architecture parameters
@@ -12,16 +13,19 @@ model:
   max_seq_len: 256
   dropout: 0.1
 
+  # loss parameters
+  length_loss: ['cross_entropy']
+  add_unk: False
+  coeff_ce: 1.0
+  coeff_vlb: 1.0
+
   #diffusion parameters
   continuous: False
-  num_timesteps: 200
-  beta_schedule: 'cosine'
-  loss_terms: ['mse','vb']
-  length_loss: 'cross_entropy'
-  pad_limit: null
-  diffuseq: false
-  legacy: false
-  
+  num_timesteps: 100
+  min_time: 0.01
+  noise_schedule: 'loglinear'
+  noise_schedule_args: {}
+
 training:
   batch_size: 64
   learning_rate: 0.0001
