@@ -73,7 +73,8 @@ class MolEncTokeniser:
         self.mask_scheme = mask_scheme
         self.span_lambda = span_lambda
 
-        self.unk_id = self.vocab[unk_token]
+        # self.unk_id = self.vocab[unk_token]
+        self.unk_id = self.vocab[mask_token]
         self.unk_token_cnt = {}
 
     @staticmethod

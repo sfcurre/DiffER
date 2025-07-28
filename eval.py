@@ -26,8 +26,9 @@ else:
 def main(name, config, load, num_samples, test, pred_lengths):
 
     print("Building tokeniser...")
-    tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
-    print("Finished tokeniser.")
+    # tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
+    tokeniser = load_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
+    print(f"Finished tokeniser with {len(tokeniser)} tokens.")
 
     DATASET = 'test' if test else 'val'
     
