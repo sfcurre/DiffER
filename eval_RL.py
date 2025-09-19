@@ -28,9 +28,9 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
 
     print("Building tokeniser...")
     if config['data']['selfies']:
-        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['data_path'])
+        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
     else:
-        tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
+        tokeniser = load_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
     print("Finished tokeniser.")
 
     DATASET = 'test' if test else 'val'

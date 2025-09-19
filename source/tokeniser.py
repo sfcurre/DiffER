@@ -78,7 +78,8 @@ class MolEncTokeniser:
         self.span_lambda = span_lambda
         self.selfies = selfies
 
-        self.unk_id = self.vocab[unk_token]
+        # self.unk_id = self.vocab[unk_token]
+        self.unk_id = self.vocab[mask_token]
         self.unk_token_cnt = {}
 
     @staticmethod

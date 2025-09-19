@@ -22,10 +22,16 @@ conda activate deepchem
 
 cd ~/Retro-Diffusion
 
-PadLimit=80
-FineTune=1
+PadLimit=20
+FineTune=3
 FineTuneSub=$((FineTune-1))
 
+
+# python train.py --name "BackwardUnifiedContinuousFull_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous_full.yaml" --load "out/models/BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
+
+python train.py --name "BackwardUnifiedDiscreteFull_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_discrete_full.yaml" --load "out/models/BackwardUnifiedDiscrete_PadLimit${PadLimit}-${FineTuneSub}.pkl" --pad_limit $PadLimit
+
+#=================================================================
 
 # if (($FineTune == 0)); then
 #     python train.py --name "BackwardUnifiedContinuous_PadLimit${PadLimit}-${FineTune}" --config_path "configs/unified_continuous.yaml" --pad_limit $PadLimit
@@ -51,11 +57,11 @@ FineTuneSub=$((FineTune-1))
 #     python train.py --name "ForwardUnifiedContinuous_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous_forward.yaml" --load "out/models/ForwardUnifiedContinuous_NoPadLimit-${FineTuneSub}.pkl" --pad_limit -1
 # fi
 
-if (($FineTune == 0)); then
-    python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --pad_limit -1
-else
-    python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --load "out/models/BackwardUnifiedDiscrete_NoPadLimit-${FineTuneSub}.pkl" --pad_limit -1
-fi
+# if (($FineTune == 0)); then
+#     python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --pad_limit -1
+# else
+#     python train.py --name "BackwardUnifiedDiscrete_NoPadLimit-${FineTune}" --config_path "configs/unified_discrete.yaml" --load "out/models/BackwardUnifiedDiscrete_NoPadLimit-${FineTuneSub}.pkl" --pad_limit -1
+# fi
 
 # if (($FineTune == 0)); then
 #     python train.py --name "BackwardUnifiedContinuousMoE_NoPadLimit-${FineTune}" --config_path "configs/unified_continuous_moe.yaml" --pad_limit -1

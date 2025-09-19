@@ -25,9 +25,9 @@ def main(name, config, load):
 
     print("Building tokeniser...")
     if config['data']['selfies']:
-        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['data_path'])
+        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
     else:
-        tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
+        tokeniser = load_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
     print(f"Finished tokeniser with {len(tokeniser)} tokens.")
     
     if config['data']['task'] == "forward_prediction":
