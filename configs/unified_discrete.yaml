@@ -2,6 +2,7 @@ data:
   data_path: 'data/USPTO_50K_PtoR_aug20'
   task: 'backward_prediction'
   pad_limit: null
+  selfies: false
 
 model:
   # architecture parameters
