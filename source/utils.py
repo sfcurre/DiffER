@@ -1,6 +1,7 @@
 import numpy
 import torch
 import math
+import selfies as sf
 
 from rdkit import Chem
 
@@ -19,8 +20,10 @@ def repeat_batch(batch, num_samples):
     batch['decoder_smiles'] *= num_samples
     batch['target_smiles'] *= num_samples
 
-def canonicalize(smi):
+def canonicalize(smi, selfies=False):
     smi = smi.replace('?', '')
+    if selfies:
+        smi = sf.decoder(smi)
     m = Chem.MolFromSmiles(smi)
     if m is None:
         return None

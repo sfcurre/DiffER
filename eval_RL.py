@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
-from source.tokeniser import load_tokeniser_from_rsmiles
+from source.tokeniser import load_tokeniser_from_rsmiles, load_selfies_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.discrete_diffusion import UnifiedDiscreteDiffusion
 from source.guidance_model import GuidanceModel
@@ -27,7 +27,10 @@ else:
 def main(name, config, load, num_samples, test, pred_lengths, guidance_type, forward):
 
     print("Building tokeniser...")
-    tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
+    if config['data']['selfies']:
+        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['data_path'])
+    else:
+        tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
     print("Finished tokeniser.")
 
     DATASET = 'test' if test else 'val'
@@ -50,7 +53,7 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
     num_workers = num_available_cpus // config['training']['gpus']
     
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
+        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'], selfies=config['data']['selfies'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=False,
@@ -112,7 +115,7 @@ def main(name, config, load, num_samples, test, pred_lengths, guidance_type, for
             break
 
         if guidance_type == 'particle':
-            guidance_model = ParticleGuidanceModel(model)
+            guidance_model = ParticleGuidanceModel(model, selfies=config['data']['selfies'])
         elif guidance_type == 'memory':
             guidance_model = GuidanceModel(model)
         

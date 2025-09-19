@@ -4,8 +4,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+import selfies as sf
+
 class RSmilesUspto50(torch.utils.data.Dataset):
-    def __init__(self, tokeniser, data_path, split='train', forward=False, pad_limit=None, max_seq_len=256):
+    def __init__(self, tokeniser, data_path, split='train', forward=False, pad_limit=None, max_seq_len=256, selfies=False):
         self.path = Path(data_path)
         reactants, products = self.read_data_dir(self.path, split)
 
@@ -18,6 +20,7 @@ class RSmilesUspto50(torch.utils.data.Dataset):
         self.forward = forward
         self.pad_limit = pad_limit
         self.max_seq_len = max_seq_len
+        self.selfies = selfies
 
     def __len__(self):
         return len(self.reactants)
@@ -30,6 +33,10 @@ class RSmilesUspto50(torch.utils.data.Dataset):
 
     def transform(self, reactant, product):
         react_str, prod_str = reactant.replace(' ', ''), product.replace(' ', '')
+        
+        if self.selfies:
+            react_str = sf.encoder(react_str)
+            prod_str = sf.encoder(prod_str)
         
         if self.forward:
             encoder_smiles, decoder_smiles = react_str, prod_str

@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from rdkit import Chem, RDLogger
+from functools import partial
 
 from .utils import canonicalize
 
@@ -18,8 +19,10 @@ and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/t
 class ParticleGuidanceModel(nn.Module):
     def __init__(self,
         conditional_model,
-        ):
+        selfies=False):
         super(ParticleGuidanceModel, self).__init__()
+
+        self.selfies = selfies
 
         self.d_model = conditional_model.d_model
         self.tokeniser = conditional_model.tokeniser
@@ -74,7 +77,8 @@ class ParticleGuidanceModel(nn.Module):
         ids = tgt_tokens.max(dim=-1)[1].cpu().numpy()
         tokens = self.tokeniser.convert_ids_to_tokens(ids)
         sampled_mols = self.tokeniser.detokenise(tokens)
-        sampled_mols = list(map(canonicalize, (m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols)))
+        canonicalize_ = partial(canonicalize, selfies=self.selfies)
+        sampled_mols = list(map(canonicalize_, (m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols)))
         return sampled_mols
         
     def get_distance_scores(self, sampled_mols):

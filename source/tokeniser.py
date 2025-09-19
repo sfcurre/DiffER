@@ -3,6 +3,8 @@ import torch
 import random
 from pathlib import Path
 
+import selfies as sf
+
 '''
 This code is copied from Chemformer: https://github.com/MolecularAI/Chemformer
 '''
@@ -20,6 +22,7 @@ DEFAULT_MASK_SCHEME = "span"
 DEFAULT_SPAN_LAMBDA = 3.0
 
 REGEX = "\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|\&|>|\*|\$|\%[0-9]{2}|[0-9]|<MASK>|<PAD>|<SEP>"
+SELFIES_REGEX = ".*?]|\?|\&|<MASK>|<PAD>|<SEP>"
 
 class MolEncTokeniser:
     def __init__(
@@ -36,7 +39,8 @@ class MolEncTokeniser:
         mask_prob=DEFAULT_MASK_PROB,
         show_mask_token_prob=DEFAULT_SHOW_MASK_TOKEN_PROB,
         mask_scheme=DEFAULT_MASK_SCHEME,
-        span_lambda=DEFAULT_SPAN_LAMBDA
+        span_lambda=DEFAULT_SPAN_LAMBDA,
+        selfies=False
     ):
         """ Initialise the tokeniser
 
@@ -72,6 +76,7 @@ class MolEncTokeniser:
         self.show_mask_token_prob = show_mask_token_prob
         self.mask_scheme = mask_scheme
         self.span_lambda = span_lambda
+        self.selfies = selfies
 
         self.unk_id = self.vocab[unk_token]
         self.unk_token_cnt = {}
@@ -226,7 +231,7 @@ class MolEncTokeniser:
 
     def tokenise(self, sents1, sents2=None, mask=False, pad=False):
         if sents2 is not None and len(sents1) != len(sents2):
-            raise ValueError("Sentence 1 batch and sentence 2 batch must have the same number of elements")
+            raise ValueError("Sentence 1 batch and sentence 2 batch must have the same number of elements")    
 
         tokens = self._regex_match(sents1)
         m_tokens, token_masks = self._mask_tokens(tokens, empty_mask=not mask)
@@ -431,4 +436,19 @@ def load_tokeniser_from_rsmiles(data_path):
         reactants = list(map(lambda x: x.strip().replace(' ', ''), fp.readlines()))
 
     tokeniser = MolEncTokeniser.from_smiles(products + reactants, REGEX)
+    return tokeniser
+
+
+def load_selfies_tokeniser_from_rsmiles(data_path):
+    path = Path(data_path)
+    product_path = path / 'train' / f'src-train.txt'
+    reactant_path = path / 'train' / f'tgt-train.txt'
+
+    with open(product_path) as fp:
+        products = list(map(lambda x: sf.encoder(x.strip().replace(' ', '')), fp.readlines()))
+
+    with open(reactant_path) as fp:
+        reactants = list(map(lambda x: sf.encoder(x.strip().replace(' ', '')), fp.readlines()))
+
+    tokeniser = MolEncTokeniser.from_selfies(products + reactants, SELFIES_REGEX)
     return tokeniser

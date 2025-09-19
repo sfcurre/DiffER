@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
 import io, base64, PIL
+import selfies as sf
 
 from scipy.stats import pointbiserialr, pearsonr, linregress
 from scipy.stats.contingency import crosstab, odds_ratio, chi2_contingency
@@ -35,7 +36,7 @@ IPythonConsole.molSize = 300,300
 RDLogger.DisableLog("rdApp.*")
 
 rxn_types = {'<RX_1>': 'Heteroatom alkylation and arylation',
-                     '<RX_2>': 'acylation and related processes',
+                     '<RX_2>': 'acyclation and related processes',
                      '<RX_3>': 'C-C bond formation',
                      '<RX_4>': 'heterocycle formation',
                      '<RX_5>': 'protections',
@@ -93,6 +94,8 @@ def wiener_index(m):
 
 def canonicalize(smi):
     smi = smi.replace('?', '')
+    if sf.is_selfies(smi):
+        smi = sf.decoder(smi)
     m = Chem.MolFromSmiles(smi)
     if m is None:
         return None
@@ -202,13 +205,18 @@ def process_samples(samples):
         data['SourceSmiles'].append(canon_source)
         target = samples[source]['target']
         smis = samples[source]['samples']
+        if sf.is_selfies(source):
+            source = sf.decoder(source)
+        if sf.is_selfies(target):
+            target = sf.decoder(target)
         mol = target_mol = Chem.MolFromSmiles(target.rstrip('?'))
         canon_target = Chem.MolToSmiles(mol)
 
         for rxn_type in rxn_types.values():
             data[rxn_type].append(False)
         
-        data[rxn_type_map[canon_source]][-1] = True
+        if canon_source in rxn_type_map:
+            data[rxn_type_map[canon_source]][-1] = True
 
         source_length = get_tokenised_length(tokeniser, source)
         target_length = get_tokenised_length(tokeniser, target)

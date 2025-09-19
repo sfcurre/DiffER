@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
-from source.tokeniser import load_tokeniser_from_rsmiles
+from source.tokeniser import load_tokeniser_from_rsmiles, load_selfies_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
 from source.conditional_moe_model import ConditionalMoEModel
 from source.discrete_diffusion import UnifiedDiscreteDiffusion
@@ -24,7 +24,10 @@ else:
 def main(name, config, load):
 
     print("Building tokeniser...")
-    tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
+    if config['data']['selfies']:
+        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['data_path'])
+    else:
+        tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
     print(f"Finished tokeniser with {len(tokeniser)} tokens.")
     
     if config['data']['task'] == "forward_prediction":
@@ -40,7 +43,7 @@ def main(name, config, load):
     num_workers = num_available_cpus // config['training']['gpus']
     
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'])
+        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'], selfies=config['data']['selfies'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
