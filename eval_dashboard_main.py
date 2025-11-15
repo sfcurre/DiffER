@@ -12,7 +12,9 @@ import selfies as sf
 from scipy.stats import pointbiserialr, pearsonr, linregress
 from scipy.stats.contingency import crosstab, odds_ratio, chi2_contingency
 import scipy.stats as stats
+import statsmodels.api as sm
 from sklearn.metrics import matthews_corrcoef, jaccard_score, balanced_accuracy_score
+from sklearn.linear_model import LogisticRegression
 from difflib import SequenceMatcher
 from collections import defaultdict, Counter
 from altair import datum
@@ -94,7 +96,7 @@ def wiener_index(m):
 
 def canonicalize(smi):
     smi = smi.replace('?', '')
-    if sf.is_selfies(smi):
+    if smi.startswith('['):
         smi = sf.decoder(smi)
     m = Chem.MolFromSmiles(smi)
     if m is None:
@@ -201,13 +203,11 @@ def process_samples(samples):
     for i, source in enumerate(samples):
         if (i+1) % 10 == 0:
             loading_bar.progress((i+1) / len(samples), f"Calculating sample statistics... {i+1}/{len(samples)}")
-        canon_source = canonicalize(source)
+        canon_source = source #= canonicalize(source)
         data['SourceSmiles'].append(canon_source)
         target = samples[source]['target']
         smis = samples[source]['samples']
-        if sf.is_selfies(source):
-            source = sf.decoder(source)
-        if sf.is_selfies(target):
+        if target.startswith('['):
             target = sf.decoder(target)
         mol = target_mol = Chem.MolFromSmiles(target.rstrip('?'))
         canon_target = Chem.MolToSmiles(mol)
@@ -384,12 +384,12 @@ col2.metric("Per Sample Accuracy", f"{data['SampleAccuracy'].mean():2.3%}")
 st.write('Top-k accuracy:')
 
 col1, col2 = st.columns(2)#, col3, col4 = st.columns(4)
-col1.metric("k=1", f"{data['K=1'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=1'].mean(), len(data)):.2%}")
-col2.metric("k=3", f"{data['K=3'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=3'].mean(), len(data)):.2%}")
+col1.metric("k=1", f"{data['K=1'].mean():2.1%} $\\pm$ {calc_topk_interval(data['K=1'].mean(), len(data)):.2%}")
+col2.metric("k=3", f"{data['K=3'].mean():2.1%} $\\pm$ {calc_topk_interval(data['K=3'].mean(), len(data)):.2%}")
 
 col1, col2 = st.columns(2)#, col3, col4 = st.columns(4)
-col1.metric("k=5", f"{data['K=5'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=5'].mean(), len(data)):.2%}")
-col2.metric("k=10", f"{data['K=10'].mean():2.1%} $\pm$ {calc_topk_interval(data['K=10'].mean(), len(data)):.2%}")
+col1.metric("k=5", f"{data['K=5'].mean():2.1%} $\\pm$ {calc_topk_interval(data['K=5'].mean(), len(data)):.2%}")
+col2.metric("k=10", f"{data['K=10'].mean():2.1%} $\\pm$ {calc_topk_interval(data['K=10'].mean(), len(data)):.2%}")
 
 
 st.write('Statistics on number of samples produced:')
@@ -466,25 +466,36 @@ st.header('Lines of best fit for Dataset Statistics')
 
 data_rsmiles = pd.read_pickle('st_rsmiles_data.tmp')
 statistics = ['TargetLengthIncrease', 'EditDistance', 'TanimotoSimilarity', 'RingForming', 'RingOpening', 'RingCount', 'BranchCount', 'NumAtoms', 'TargetLength']
+statistics = ['TargetLengthIncrease', 'EditDistance', 'BranchCount']
 ks = ['K=1', 'K=3', 'K=10']
 dat_mat = []
 for stat in statistics:
     dat_mat.append([])
     print(stat)
     for k in ks:
-        res_differ = linregress(data[stat], data[k])
-        res_rsmiles = linregress(data_rsmiles[stat], data_rsmiles[k])
+        res_differ = sm.Logit(data[k], sm.add_constant(data[stat])).fit(disp=0)
+        res_rsmiles = sm.Logit(data_rsmiles[k], sm.add_constant(data_rsmiles[stat])).fit(disp=0)
+        
+        res_differ.slope = res_differ.params[stat]
+        res_differ.stderr = res_differ.bse[stat]
+        res_differ.pvalue = res_differ.pvalues[stat]
+        res_rsmiles.slope = res_rsmiles.params[stat]
+        res_rsmiles.stderr = res_rsmiles.bse[stat]
+        res_rsmiles.pvalue = res_rsmiles.pvalues[stat]
+
+        # res_differ = linregress(data[stat], data[k])
+        # res_rsmiles = linregress(data_rsmiles[stat], data_rsmiles[k])
         
         z = (res_differ.slope - res_rsmiles.slope) / np.sqrt(res_differ.stderr**2 + res_rsmiles.stderr**2)
         p = 2 * stats.norm.cdf(-abs(z))
         
-        significance = ''.join(['*' for t in [.05, .01, .001] if res_differ.pvalue<=t])
-        rsmiles_significance = ''.join(['+' for t in [.05, .01, .001] if p<=t])
+        significance = ''.join(['*' for t in [.1, .05, .01, .001] if res_differ.pvalue<=t])
+        rsmiles_significance = ''.join(['+' for t in [.1, .05, .01, .001] if p<=t])
         difference = res_differ.slope - res_rsmiles.slope
         dat_mat[-1].append(f'{res_differ.slope:.4f}{significance} ({difference:.4f}){rsmiles_significance}')
         
-        part1 = f'\\textbf{{{res_differ.slope:.4f}}}' if res_differ.pvalue <= .01 else (f'\\underline{{{res_differ.slope:.4f}}}' if res_differ.pvalue <= .05 else f'{res_differ.slope:.4f}')
-        part2 = f'\\textbf{{({difference:+.4f})}}' if p <= .01 else (f'(\\underline{{{difference:+.4f}}})' if p <= .05 else f'({difference:+.4f})')
+        part1 = f'\\textbf{{{res_differ.slope:.4f}}}' if res_differ.pvalue <= .05 else (f'\\underline{{{res_differ.slope:.4f}}}' if res_differ.pvalue <= .1 else f'{res_differ.slope:.4f}')
+        part2 = f'\\textbf{{({difference:+.4f})}}' if p <= .05 else (f'(\\underline{{{difference:+.4f}}})' if p <= .1 else f'({difference:+.4f})')
         print(f'{part1}~{part2} ' + ('&' if k != ks[-1] else '\\\\'))
 
 st.dataframe(pd.DataFrame(dat_mat, index=statistics, columns=ks))
@@ -726,29 +737,95 @@ st.pyplot(f)
 
 st.header('Lines of best fit for Dataset Statistics')
 
-statistics = ['TargetLengthIncrease', 'EditDistance', 'RingForming', 'RingOpening', 'BranchCount']
-titles = ['Target Length Diff.', 'Edit Distance', 'Ring Adding', 'Ring Removing', 'Branch Count']
+data['RingReaction'] = data['RingForming'].astype(int) - data['RingOpening'].astype(int)
+data_rsmiles['RingReaction'] = data_rsmiles['RingForming'].astype(int) - data_rsmiles['RingOpening'].astype(int)
+
+statistics = ['TargetLengthIncrease', 'BranchCount', 'EditDistance', 'RingReaction']
+titles = ['Target Length Diff.', 'Branch Count', 'Edit Distance', 'Ring Reactions']
 ks = ['K=1', 'K=3', 'K=10']
-fig, axes = plt.subplots(len(ks), len(statistics), figsize=(13, 2.2*len(ks)), sharex=False, sharey=True, squeeze=False)
+fig, axes = plt.subplots(len(ks), len(statistics), figsize=(13, 2.2*len(ks)), sharex='col', sharey=False, squeeze=False, layout='constrained')
 for i, stat in enumerate(statistics):
     print(stat)
     for j, k in enumerate(ks):
-        res_differ = linregress(data[stat], data[k])
-        res_rsmiles = linregress(data_rsmiles[stat], data_rsmiles[k])
+        if stat == 'RingReaction':
+            rdata_differ = data[data[stat] != 0][[stat, k]]
+            rdata_differ['Model'] = 'DiffER$^2$PG+'
+            rdata_rsmiles = data_rsmiles[data_rsmiles[stat] != 0][[stat, k]]
+            rdata_rsmiles['Model'] = 'R-SMILES'
+            rdata = pd.concat([rdata_differ, rdata_rsmiles], axis=0)
+            # sns.barplot(x=stat, y=k, data=rdata, width=0.5, ax=axes[j, i], hue='Model', palette=['tab:blue', 'tab:red'], errorbar=None)
+            # dat = rdata_differ.groupby(stat).count()
+            sns.barplot(x=stat, y=k, data=rdata_differ, color='gray', alpha=0.3, fill=True, ax=axes[j, i], width=0.5, estimator=len, edgecolor='black')
+            sns.barplot(x=stat, y=k, data=rdata, width=0.5, ax=axes[j, i], hue='Model', palette=['tab:blue', 'tab:red'], errorbar=None, estimator=np.sum, edgecolor='black')
+            axes[j, i].set_xlabel('')
+            axes[j, i].set_ylabel('Count')
+            axes[j, i].set_xticks([0, 1], ['Ring Removing', 'Ring Adding'], fontsize=12)
+            axes[j, i].legend_.remove()
+        else:
+            # res_differ = linregress(data[stat], data[k])
+            # res_rsmiles = linregress(data_rsmiles[stat], data_rsmiles[k])
 
-        vals = np.linspace(data[stat].min(), data[stat].max(), 10)
-        y_differ = res_differ.intercept + res_differ.slope * vals
-        y_rsmiles = res_rsmiles.intercept + res_rsmiles.slope * vals
-        axes[j, i].plot(vals, y_differ, label='DiffER$^2$PG+', color='tab:blue')
-        axes[j, i].plot(vals, y_rsmiles, label='R-SMILES', color='tab:orange')
-        axes[j, i].set_xlim(vals.min(), vals.max())
-        axes[j, i].set_ylim(0, 1)
+            # vals = np.linspace(data[stat].min(), data[stat].max(), 30)#len(set(data[stat])))
+            # y_differ = res_differ.intercept + res_differ.slope * vals
+            # y_rsmiles = res_rsmiles.intercept + res_rsmiles.slope * vals
+            # intersect = -(res_differ.intercept - res_rsmiles.intercept) / (res_differ.slope - res_rsmiles.slope)
+
+            regressor = sm.Logit(data[k], sm.add_constant(data[stat]))
+            res = regressor.fit(disp=0)
+            # print(res.summary())
+
+            regressor_rsmiles = sm.Logit(data_rsmiles[k], sm.add_constant(data_rsmiles[stat]))
+            res_rsmiles = regressor_rsmiles.fit(disp=0)
+            # print(res_rsmiles.summary())
+
+            def sigmoid(x):
+                return 1 / (1 + np.exp(-x))
+            
+            vals = np.linspace(data[stat].min(), data[stat].max(), 30)#len(set(data[stat])))
+            y_differ = sigmoid(res.params['const'] + res.params[stat] * vals)
+            y_rsmiles = sigmoid(res_rsmiles.params['const'] + res_rsmiles.params[stat] * vals)
+
+            # data[stat] = pd.cut(data[stat], bins=vals, labels=(vals[1:] + vals[:-1])/2, include_lowest=True).astype(float)
+            # y_differ = data.groupby(stat)[k].mean()
+            # data_rsmiles[stat] = pd.cut(data_rsmiles[stat], bins=vals, labels=(vals[1:] + vals[:-1])/2, include_lowest=True).astype(float)
+            # y_rsmiles = data_rsmiles.groupby(stat)[k].mean()
+            # axes[j, i].plot(vals, y_differ, color='tab:blue', marker='o', markersize=4, linestyle='')
+            # axes[j, i].plot(vals, y_rsmiles, color='tab:red', marker='*', markersize=4, linestyle='')
+
+            # difference = y_differ - y_rsmiles
+            # axes[j, i].stem(difference.index, difference.values, linefmt='k-', markerfmt='.', basefmt='k-')#, markercolor='tab:blue', linecolor='k')
+            # axes[j, i].plot(vals, difference, color='tab:blue')
+            # axes[j, i].axhline(0, color='black', linestyle='--', linewidth=1)
+            # axes[j, i].axvline(np.median(data[stat]), color='red', linestyle='--', linewidth=1)
+            # axes[j, i].axvline(intersect, color='black', linestyle='--', linewidth=1)
+            # axes[j, i].set_ylim(-0.1, 0.3)
+            
+            axes[j, i].plot(vals, y_differ, label='DiffER$^2$PG+', color='tab:blue')
+            axes[j, i].plot(vals, y_rsmiles, label='R-SMILES', color='tab:red')
+            ax2 = axes[j, i].twinx()
+            sns.histplot(data[stat], color='gray', alpha=0.3, fill=True, ax=ax2, bins=vals)
+            ax2.set_ylabel('', fontsize=12)
+
+            # sns.histplot(data[data[k] == 1][stat], color='tab:blue', alpha=0.5, fill=True, ax=ax2, bins=vals)
+            # ax2.set_ylabel('', fontsize=12)
+            # sns.histplot(data_rsmiles[data_rsmiles[k] == 1][stat], color='tab:red', alpha=0.5, fill=True, ax=ax2, bins=vals)
+            ax2.set_ylabel('', fontsize=12)
+            ax2.set_yticks([])
+            axes[j, i].set_xlim(vals.min(), vals.max())
+            if i == 0:
+                axes[j, i].set_xlim(vals.min(), 25)
+            if i == 1:
+                axes[j, i].set_xlim(vals.min(), 15)
+            if i == 2:
+                axes[j, i].set_xlim(vals.min(), 40)
+            axes[j, i].set_ylim(0.2, 1.0)
+            # axes[j, i].set_ylim(-0.3, 0.3)
 
         if i == 0:
-            axes[j, i].set_ylabel(k, fontsize=16)
+            axes[j, i].set_ylabel(f'Top-{k.split('=')[-1]} Accuracy', fontsize=16)
         if j == 0:
             axes[j, i].set_title(titles[i], fontsize=16)
 
-axes[-1, -1].legend(fontsize=12, loc='lower left')
+axes[0, -1].legend(fontsize=12, loc='upper right')
 
 st.pyplot(fig)
