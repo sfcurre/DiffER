@@ -7,10 +7,11 @@ from torch.utils.data import DataLoader
 from source.data import RSmilesUspto50
 from source.tokeniser import load_tokeniser_from_rsmiles, load_selfies_tokeniser_from_rsmiles
 from source.conditional_model import ConditionalModel
-from source.conditional_model_attn_eval import ConditionalModelAttnEval
 from source.discrete_diffusion import UnifiedDiscreteDiffusion
-from source.trainer import UnifiedTrainer
-from source.sampler import UnifiedSampler
+from source.guidance_model import GuidanceModel
+from source.particle_guidance_model import ParticleGuidanceModel
+from source.guidance_sampler import GuidanceSampler
+from source.forward_guidance_sampler import ForwardGuidanceSampler
 from source.utils import move_batch_to_gpu, repeat_batch
 
 import json
@@ -23,7 +24,7 @@ else:
     print("Using CPU.")
 
 #========================================================================
-def main(name, config, load, num_samples, test, pred_lengths):
+def main(name, config, load, num_samples, test, pred_lengths, guidance_type, forward):
 
     print("Building tokeniser...")
     if config['data']['selfies']:
@@ -55,15 +56,12 @@ def main(name, config, load, num_samples, test, pred_lengths):
         dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'], selfies=config['data']['selfies'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
-                                        shuffle=True,
+                                        shuffle=False,
                                         num_workers=num_workers,
                                         collate_fn=dataset.collate_fn)
     print("Finished datasets.")
 
-    model_type = ConditionalModel
-    if args.record_attns:
-        model_type = ConditionalModelAttnEval
-    model = model_type(
+    model = ConditionalModel(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
         d_model=config['model']['d_model'],
@@ -78,10 +76,6 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
     if use_gpu:
         model = model.cuda()
- 
-    optimizer = optim.Adam(model.parameters(),
-                           lr=config['training']['learning_rate'],
-                           weight_decay=config['training']['weight_decay'])
     
     diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * (not config['model']['continuous']),
                                         num_classes=len(tokeniser),
@@ -89,31 +83,49 @@ def main(name, config, load, num_samples, test, pred_lengths):
                                         noise_schedule_args=config['model']['noise_schedule_args'],
                                         )
 
-    sampler = UnifiedSampler(diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
-    
-    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu)    
-    
-    # if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
-    #     os.remove(f'out/metrics/{name}_metrics_log.txt')
+    if guidance_type == 'forward':
+        sampler = ForwardGuidanceSampler(diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
+    else:
+        sampler = GuidanceSampler(diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
 
-    # if not os.path.exists(f'out/samples/{name}/'):
-    #     os.mkdir(f'out/samples/{name}/')
+    if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
+        os.remove(f'out/metrics/{name}_metrics_log.txt')
 
     print(f'Evaluating {name}...')
     model.eval()
-  
-    # torch.manual_seed(1998) 
-    # with torch.no_grad():
-    #     trainer.print_metrics(dataloaders[DATASET], 'Eval', 10)
 
-    torch.manual_seed(1998)
+    if guidance_type == 'forward':
+        guidance_model = ConditionalModel(
+        tokeniser=tokeniser,
+        max_seq_len=config['model']['max_seq_len'],
+        d_model=config['model']['d_model'],
+        num_layers=config['model']['num_layers'],
+        num_heads=config['model']['num_heads'],
+        d_feedforward=config['model']['d_feedforward'],
+        activation=config['model']['activation'],
+        dropout=config['model']['dropout'])
+        guidance_model.load_state_dict(torch.load(forward))
+
+    torch.manual_seed(1998) 
     all_targets = {}
     attns = {}
     for i, batch in enumerate(dataloaders[DATASET]):
 
         if i == args.batch_limit:
             break
+
+        if guidance_type == 'particle':
+            guidance_model = ParticleGuidanceModel(model, selfies=config['data']['selfies'])
+        elif guidance_type == 'memory':
+            guidance_model = GuidanceModel(model)
         
+        if use_gpu:
+            guidance_model = guidance_model.cuda()
+ 
+        optimizer = optim.Adam(guidance_model.parameters(),
+                           lr=config['training']['learning_rate'],
+                           weight_decay=config['training']['weight_decay'])
+
         targets = {}
         for target, source in zip(batch['target_smiles'], batch['encoder_smiles']):
             targets[source] = {'target': target, 'samples':[]}
@@ -126,6 +138,8 @@ def main(name, config, load, num_samples, test, pred_lengths):
 
         sampled_mols, _ = sampler.sample(batch,
                                           model,
+                                          guidance_model,
+                                          optimizer,
                                           verbose=False,
                                           pred_lengths=pred_lengths,
                                           clean=False)
@@ -133,8 +147,10 @@ def main(name, config, load, num_samples, test, pred_lengths):
             targets[batch['encoder_smiles'][j]]['samples'].append(smi)
 
         if i < args.record_attns:
-            sampled_mols, _, in_attns, out_attns = sampler.sample(batch,
+            sampled_mols, _, in_attns, out_attns = diffuser.sample(batch,
                                                                    model,
+                                                                   guidance_model,
+                                                                   optimizer,
                                                                    verbose=False,
                                                                    pred_lengths=pred_lengths,
                                                                    clean=False,
@@ -143,9 +159,9 @@ def main(name, config, load, num_samples, test, pred_lengths):
                 attns[batch['encoder_smiles'][j]] = smi_data = {}
                 smi_data['target'] = batch['decoder_smiles'][j]
                 smi_data['sample'] = smi
-                smi_data['in_attns'] = {k: v[j] for k, v in in_attns.items()}
+                smi_data['in_attns'] = {k: v[j, :] for k, v in in_attns.items()}
                 smi_data['x_t'] = {t: k[j] for t, (k, _) in out_attns.items()}
-                smi_data['out_attns'] = {t: {k: v[j] for k, v in out_t.items()} for t, (_, out_t) in out_attns.items()}
+                smi_data['out_attns'] = {t: {k: v[j, :] for k, v in out_t.items()} for t, (_, out_t) in out_attns.items()}
 
         print(f'Batch {i} complete.')
         
@@ -169,14 +185,15 @@ if __name__ == '__main__':
     parser.add_argument("--name", type=str)
     parser.add_argument("--config_path", type=str)
     parser.add_argument("--load", type=str, default='')
-    parser.add_argument("--num_samples", type=int, default=20)
+    parser.add_argument("--num_samples", type=int, default=1)
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--use_true_lengths", action='store_true')
     parser.add_argument("--record_attns", type=int, default=0)
     parser.add_argument("--pad_limit", type=int, default=None)
     parser.add_argument("--batch_limit", type=int, default=-1)
+    parser.add_argument("--memory", action='store_true')
+    parser.add_argument("--forward", type=str, default='')
     parser.add_argument("--batch_size", type=int, default=None)
-    parser.add_argument("--num_timesteps", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
@@ -189,7 +206,10 @@ if __name__ == '__main__':
     if args.batch_size is not None:
         config['training']['batch_size'] = args.batch_size
 
-    if args.num_timesteps is not None:
-        config['model']['num_timesteps'] = args.num_timesteps
-    
-    main(args.name, config, args.load, args.num_samples, args.test, not args.use_true_lengths)
+    guidance_type = 'particle'
+    if args.memory:
+        guidance_type = 'memory'
+    if args.forward:
+        guidance_type = 'forward'
+
+    main(args.name, config, args.load, args.num_samples, args.test, not args.use_true_lengths, guidance_type, args.forward)

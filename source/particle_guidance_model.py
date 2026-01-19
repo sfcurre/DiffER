@@ -1,0 +1,113 @@
+import numpy as np
+import math
+import copy
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from rdkit import Chem, RDLogger
+from functools import partial
+
+from .utils import canonicalize
+
+'''
+This code is heavily inspired by Chemformer (https://github.com/MolecularAI/Chemformer)
+and multinomial diffusion (https://github.com/ehoogeboom/multinomial_diffusion/tree/main)
+'''
+
+class ParticleGuidanceModel(nn.Module):
+    def __init__(self,
+        conditional_model,
+        selfies=False):
+        super(ParticleGuidanceModel, self).__init__()
+
+        self.selfies = selfies
+
+        self.d_model = conditional_model.d_model
+        self.tokeniser = conditional_model.tokeniser
+        self.max_seq_len = conditional_model.max_seq_len
+
+        self.vocab_size = conditional_model.vocab_size
+        self.pad_token_idx = conditional_model.pad_token_idx
+
+        self.emb = copy.deepcopy(conditional_model.emb)
+        self.time_emb = conditional_model.time_emb
+        self.dropout = conditional_model.dropout
+
+        self.length_rep = conditional_model.length_rep
+        self.encoder = copy.deepcopy(conditional_model.encoder)
+
+        self.output_fc = nn.Linear(conditional_model.d_model, 1)
+
+        self.register_buffer("pos_emb", conditional_model.positional_embs())
+
+        RDLogger.DisableLog("rdApp.*")
+
+    def forward(self, encoder_input, encoder_pad_mask):
+        encoder_embs = self.embed_onehot(encoder_input)
+        batch, _, _ = tuple(encoder_embs.size())
+        
+        len_tokens = self.length_rep(torch.zeros(batch, 1, dtype=torch.int32, device=encoder_embs.device))
+        encoder_embs = torch.cat([len_tokens, encoder_embs], dim=1)
+        encoder_pad_mask = torch.cat([encoder_pad_mask[:, :1], encoder_pad_mask], dim=-1)
+
+        model_output = self.encoder(encoder_embs, src_key_padding_mask=encoder_pad_mask)
+        model_output = model_output.mean(dim=1)
+
+        distance = model_output.unsqueeze(1) - model_output.unsqueeze(0)
+        output = self.output_fc(distance).squeeze(-1)
+        return output
+
+    def embed_onehot(self, onehot_input, t=None):
+        _, seq_len, _ = tuple(onehot_input.size())
+
+        onehot_embs = torch.matmul(onehot_input, self.emb.weight)
+        onehot_embs = onehot_embs * np.sqrt(self.d_model)
+
+        positional_embs = self.pos_emb[:seq_len, :].unsqueeze(0)
+        onehot_embs = onehot_embs + positional_embs
+        if t is not None:
+            time_embs = self.time_emb(t)
+            onehot_embs += time_embs
+        onehot_embs = self.dropout(onehot_embs)
+        return onehot_embs
+    
+    def get_canonical(self, tgt_tokens):
+        ids = tgt_tokens.max(dim=-1)[1].cpu().numpy()
+        tokens = self.tokeniser.convert_ids_to_tokens(ids)
+        sampled_mols = self.tokeniser.detokenise(tokens)
+        canonicalize_ = partial(canonicalize, selfies=self.selfies)
+        sampled_mols = list(map(canonicalize_, (m[:m.find('<PAD>')] if m.find('<PAD>') > 0 else m for m in sampled_mols)))
+        return sampled_mols
+        
+    def get_distance_scores(self, sampled_mols):
+        scores = []
+        for m1 in sampled_mols:
+            scores.append([])
+            for m2 in sampled_mols:
+                if m1 == m2 or m1 is None or m2 is None:
+                    scores[-1].append(0)
+                else:
+                    scores[-1].append(1)
+        return torch.tensor(scores, dtype=torch.float)
+
+    def get_valid_scores(self, sampled_mols):
+        scores = []
+        for m in sampled_mols:
+            if m is None:
+                scores.append(0)
+            else:
+                scores.append(1)
+        return torch.tensor(scores, dtype=torch.float)
+    
+    def get_scores(self, tgt_tokens):
+        sampled_mols = self.get_canonical(tgt_tokens)
+        valid_scores = self.get_valid_scores(sampled_mols)
+        distance_scores = self.get_distance_scores(sampled_mols)
+        return valid_scores, distance_scores
+    
+    def get_loss(self, output, scores):
+        output = torch.sigmoid(output)
+        classifier_loss = F.binary_cross_entropy(output, scores)
+        return classifier_loss

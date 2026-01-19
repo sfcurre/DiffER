@@ -1,15 +1,17 @@
 import argparse, os, yaml
 
 import torch
+from functools import partial
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from source.data import RSmilesUspto50
-from source.tokeniser import load_tokeniser_from_rsmiles
-from source.discrete_diffuser import DiscreteDiffuser
-from source.diff_model import DiffusionModel
-from source.diffuseq_model import DiffuseqModel
-from source.trainer import DiffusionModelTrainer
+from source.tokeniser import load_tokeniser_from_rsmiles, load_selfies_tokeniser_from_rsmiles
+from source.conditional_model import ConditionalModel
+from source.conditional_moe_model import ConditionalMoEModel
+from source.discrete_diffusion import UnifiedDiscreteDiffusion
+from source.trainer import UnifiedTrainer
+from source.sampler import UnifiedSampler
 
 USE_GPU = True
 use_gpu = USE_GPU and torch.cuda.is_available()
@@ -22,7 +24,10 @@ else:
 def main(name, config, load):
 
     print("Building tokeniser...")
-    tokeniser = load_tokeniser_from_rsmiles(config['data']['data_path'])
+    if config['data']['selfies']:
+        tokeniser = load_selfies_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
+    else:
+        tokeniser = load_tokeniser_from_rsmiles(config['data']['tokeniser_path'])
     print(f"Finished tokeniser with {len(tokeniser)} tokens.")
     
     if config['data']['task'] == "forward_prediction":
@@ -37,25 +42,21 @@ def main(name, config, load):
     num_available_cpus = len(os.sched_getaffinity(0))
     num_workers = num_available_cpus // config['training']['gpus']
     
-    diffuser = DiscreteDiffuser(tokeniser,
-                                forward_pred=forward_pred,
-                                num_timesteps=config['model']['num_timesteps'],
-                                max_seq_len=config['model']['max_seq_len'],
-                                beta_schedule=config['model']['beta_schedule'],
-                                pad_limit=config['model']['pad_limit'])
     for split in ['train', 'val', 'test']:
-        dataset = RSmilesUspto50(config['data']['data_path'], split, forward=forward_pred)
+        dataset = RSmilesUspto50(tokeniser, config['data']['data_path'], split, forward=forward_pred, pad_limit=config['data']['pad_limit'], max_seq_len=config['model']['max_seq_len'], selfies=config['data']['selfies'])
         dataloaders[split] = DataLoader(dataset,
                                         batch_size=config['training']['batch_size'],
                                         shuffle=True,
                                         num_workers=num_workers,
-                                        collate_fn=diffuser)
+                                        collate_fn=dataset.collate_fn)
     print("Finished datasets.")
 
-    model_class = DiffusionModel
-    if config['model']['diffuseq']:
-        model_class = DiffuseqModel
-    
+    model_class = ConditionalModel
+    moe_weight = 0
+    if 'moe' in config['model'] and config['model']['moe']:
+        model_class = partial(ConditionalMoEModel, num_experts=config['model']['num_experts'])
+        moe_weight = config['model']['moe_loss_weight']
+
     model = model_class(
         tokeniser=tokeniser,
         max_seq_len=config['model']['max_seq_len'],
@@ -76,8 +77,14 @@ def main(name, config, load):
                            lr=config['training']['learning_rate'],
                            weight_decay=config['training']['weight_decay'])
     
-    trainer = DiffusionModelTrainer(model, optimizer, diffuser, name, loss_components=config['model']['loss_terms'],
-                                    length_loss=config['model']['length_loss'], use_gpu=use_gpu)
+    diffuser = UnifiedDiscreteDiffusion(num_steps=config['model']['num_timesteps'] * (not config['model']['continuous']),
+                                        num_classes=len(tokeniser),
+                                        noise_schedule_type=config['model']['noise_schedule'],
+                                        noise_schedule_args=config['model']['noise_schedule_args'],
+                                        )
+    sampler = UnifiedSampler(diffuser, tokeniser, config['model']['num_timesteps'], config['model']['max_seq_len'], min_time=0.01, pad_limit=config['data']['pad_limit'])
+
+    trainer = UnifiedTrainer(model, optimizer, diffuser, sampler, name, length_loss=config['model']['length_loss'], coeff_ce=config['model']['coeff_ce'], coeff_vlb=config['model']['coeff_vlb'], use_gpu=use_gpu, moe_loss=moe_weight)
 
     if os.path.exists(f'out/metrics/{name}_metrics_log.txt'):
         os.remove(f'out/metrics/{name}_metrics_log.txt')
@@ -85,7 +92,6 @@ def main(name, config, load):
     print(f'Training {name} with heuristics...')
     trainer.train(dataloaders,
                   config['training']['epochs'],
-                  config['training']['patience'],
                   val_limit=10)
     
 #========================================================================
@@ -95,10 +101,16 @@ if __name__ == '__main__':
     parser.add_argument("--name", type=str)
     parser.add_argument("--config_path", type=str)
     parser.add_argument("--load", type=str, default='')
+    parser.add_argument("--pad_limit", type=int, default=None)
     args = parser.parse_args()
 
     config_file = args.config_path
     with open(config_file, 'r') as stream:
         config = yaml.load(stream, yaml.FullLoader)
+
+    if config['data']['pad_limit'] is None and args.pad_limit is not None:
+        config['data']['pad_limit'] = args.pad_limit
+    elif config['data']['pad_limit'] is None:
+        raise ValueError('Pad limit not specified in config or command line arguments.')
 
     main(args.name, config, args.load)
